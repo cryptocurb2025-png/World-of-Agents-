@@ -1,0 +1,23 @@
+{
+  "name": "world-of-agents",
+  "version": "2.0.0",
+  "description": "DOTA-style fantasy combat simulation with AI agents",
+  "type": "module",
+  "main": "simulateMatch.js",
+  "scripts": {
+    "start": "node simulateMatch.js",
+    "spectator": "node spectatorServer.js"
+  },
+  "keywords": [
+    "agents",
+    "combat",
+    "simulation",
+    "fantasy",
+    "moba",
+    "dota"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>World of Agents - Spectator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand__row">
+          <div class="crest crest--alliance" aria-hidden="true"></div>
+          <div>
+            <div class="brand__title">World of Agents</div>
+            <div class="brand__sub">Spectator</div>
+          </div>
+          <div class="crest crest--horde" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="conn">
+        <span class="conn__label">WebSocket:</span>
+        <span id="status" class="connecting">Connecting...</span>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <div class="hud">
+        <div id="tick" class="tick">Tick: -</div>
+
+        <section class="bases" aria-label="Strongholds">
+          <div class="base base--alliance" id="base-alliance">
+            <div class="base__head">
+              <div class="base__name">Alliance Stronghold</div>
+              <div class="base__hp" id="base-alliance-hp">-</div>
+            </div>
+            <div class="bar" role="img" aria-label="Alliance stronghold health">
+              <div class="bar__fill" id="base-alliance-bar" style="width:0%"></div>
+            </div>
+          </div>
+
+          <div class="base base--horde" id="base-horde">
+            <div class="base__head">
+              <div class="base__name">Horde Stronghold</div>
+              <div class="base__hp" id="base-horde-hp">-</div>
+            </div>
+            <div class="bar" role="img" aria-label="Horde stronghold health">
+              <div class="bar__fill" id="base-horde-bar" style="width:0%"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid" aria-label="Battlefield">
+          <section class="lanes" aria-label="Lanes">
+            <header class="sectionHead">
+              <div class="sectionHead__title">Lanes</div>
+              <div class="sectionHead__meta" id="towers-summary">Towers: -</div>
+            </header>
+
+            <div class="mapWrap" aria-label="Battle Map">
+              <canvas id="battlemap" class="map" width="980" height="420"></canvas>
+              <div class="mapLegend">
+                <span class="legendDot legendDot--alliance"></span> Alliance
+                <span class="legendDot legendDot--horde"></span> Horde
+                <span class="legendDot legendDot--hero"></span> Hero
+              </div>
+            </div>
+
+            <div class="lane" id="lane-top" data-lane="top">
+              <div class="lane__title">Top</div>
+              <div class="lane__frontline">
+                <div class="meter" aria-label="Top lane frontline">
+                  <div class="meter__fill" id="lane-top-bar" style="width:50%"></div>
+                  <div class="meter__pin" id="lane-top-pin" style="left:50%"></div>
+                </div>
+                <div class="lane__frontlineText" id="lane-top-frontline">Frontline: -</div>
+              </div>
+              <div class="lane__heroes">
+                <div class="slot slot--alliance">
+                  <div class="slot__label">Alliance</div>
+                  <div class="slot__value" id="lane-top-hero-alliance">-</div>
+                </div>
+                <div class="slot slot--horde">
+                  <div class="slot__label">Horde</div>
+                  <div class="slot__value" id="lane-top-hero-horde">-</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="lane" id="lane-mid" data-lane="mid">
+              <div class="lane__title">Mid</div>
+              <div class="lane__frontline">
+                <div class="meter" aria-label="Mid lane frontline">
+                  <div class="meter__fill" id="lane-mid-bar" style="width:50%"></div>
+                  <div class="meter__pin" id="lane-mid-pin" style="left:50%"></div>
+                </div>
+                <div class="lane__frontlineText" id="lane-mid-frontline">Frontline: -</div>
+              </div>
+              <div class="lane__heroes">
+                <div class="slot slot--alliance">
+                  <div class="slot__label">Alliance</div>
+                  <div class="slot__value" id="lane-mid-hero-alliance">-</div>
+                </div>
+                <div class="slot slot--horde">
+                  <div class="slot__label">Horde</div>
+                  <div class="slot__value" id="lane-mid-hero-horde">-</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="lane" id="lane-bot" data-lane="bot">
+              <div class="lane__title">Bot</div>
+              <div class="lane__frontline">
+                <div class="meter" aria-label="Bot lane frontline">
+                  <div class="meter__fill" id="lane-bot-bar" style="width:50%"></div>
+                  <div class="meter__pin" id="lane-bot-pin" style="left:50%"></div>
+                </div>
+                <div class="lane__frontlineText" id="lane-bot-frontline">Frontline: -</div>
+              </div>
+              <div class="lane__heroes">
+                <div class="slot slot--alliance">
+                  <div class="slot__label">Alliance</div>
+                  <div class="slot__value" id="lane-bot-hero-alliance">-</div>
+                </div>
+                <div class="slot slot--horde">
+                  <div class="slot__label">Horde</div>
+                  <div class="slot__value" id="lane-bot-hero-horde">-</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="side" aria-label="Roster and Events">
+            <section class="panel" aria-label="Heroes">
+              <header class="sectionHead">
+                <div class="sectionHead__title">Heroes</div>
+                <div class="sectionHead__meta" id="heroes-summary">-</div>
+              </header>
+
+              <div class="roster">
+                <div class="roster__col roster__col--alliance">
+                  <div class="roster__title">Alliance</div>
+                  <div id="heroes-alliance" class="cards"></div>
+                </div>
+                <div class="roster__col roster__col--horde">
+                  <div class="roster__title">Horde</div>
+                  <div id="heroes-horde" class="cards"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel" aria-label="Events">
+              <header class="sectionHead">
+                <div class="sectionHead__title">Event Feed</div>
+                <div class="sectionHead__meta">last 10</div>
+              </header>
+              <div id="events" class="events">
+                <div class="events__empty">Waiting for events...</div>
+              </div>
+            </section>
+          </aside>
+        </section>
+
+        <div class="hint">
+          JSON endpoint: <a href="/api/state">/api/state</a>
+        </div>
+      </div>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
