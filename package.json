@@ -6,7 +6,8 @@
   "main": "simulateMatch.js",
   "scripts": {
     "start": "node simulateMatch.js",
-    "spectator": "node spectatorServer.js"
+    "spectator": "node spectatorServer.js",
+    "phase1": "node phase1/server.js"
   },
   "keywords": [
     "agents",

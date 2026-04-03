@@ -1,80 +1,48 @@
-# World of Agents (WoA)
+# World of Agents
 
-A MOBA-style strategy game where humans play alongside AI agents in a WoW-inspired fantasy universe.
+World of Agents is a Warcraft-inspired AI battle simulator where large armies fight in a live "Fight Club" arena.
 
-## Overview
+The current build is focused on a high-visibility spectator experience:
 
-World of Agents combines the strategic depth of DOTA/League with AI-native gameplay. Agents make decisions via API — no clicking required. Choose your hero class, pick your lane, level up abilities, and compete for $WOA tokens.
+- Full-width battlefield canvas
+- Pixel-art units and heroes
+- Real-time events over WebSocket
+- Rotating themed rounds (Ogres vs Mages, Peasants vs Grunts, DKs vs Ballistas)
+- Live winner prediction voting
 
 ## Quick Start
 
 ```bash
-# Run local combat simulation
-cd world-of-agents
-npm start
+cd /home/absyu/world-of-agents
+npm install
+npm run spectator
 ```
 
-## Documentation
+Open `http://localhost:3000`.
 
-Full documentation available in `/docs`:
+## Scripts
 
-- **[Introduction](docs/README.md)** - Project overview
-- **[How to Play](docs/game/how-to-play.md)** - Get started in 1 minute
-- **[Gameplay Mechanics](docs/game/gameplay-mechanics.md)** - Lanes, combat, winning
-- **[Heroes & Abilities](docs/game/heroes-units-abilities.md)** - Full stat breakdown
-- **[API Reference](docs/developers/api.md)** - REST API for agents
-- **[Tech Stack](docs/developers/tech-stack.md)** - Architecture overview
-- **[Tokenomics](docs/tokenomics.md)** - $WOA token economy
+- `npm run spectator` - starts the Fight Club frontend/backend server.
+- `npm run phase1` - starts the earlier 1v1 vertical slice.
+- `npm start` - runs CLI simulation mode.
 
-## Hero Classes
+## Live Local Endpoints
 
-| Class | Role | HP | Mana | Signature Ability |
-|-------|------|-----|------|-------------------|
-| Warrior | Tank | 280 | 100 | Shield Slam (stun) |
-| Mage | Burst DPS | 175 | 200 | Fireball (AoE) |
-| Ranger | Sustained DPS | 210 | 80 | Multi-Shot |
-| Healer | Support | 140 | 250 | Holy Light |
+- `GET /api/state` - full state snapshot (includes fightClub metadata)
+- `GET /api/fightclub` - round lineup, score, prediction stats
+- `POST /api/predict` - submit vote: `{ "pick": "alliance" | "horde" }`
+- `WS /ws` - real-time state stream
 
-## Project Structure
+## Docs
 
-```
-world-of-agents/
-├── docs/                    # Full documentation
-│   ├── game/               # Gameplay docs
-│   ├── developers/         # API & tech docs
-│   └── tokenomics.md       # Token economy
-├── Agent.js                # Agent/hero module
-├── Ability.js              # Ability system
-├── CombatEngine.js         # Combat logic
-├── simulateMatch.js        # CLI simulation
-└── package.json
-```
+- `docs/README.md`
+- `docs/game/how-to-play.md`
+- `docs/game/gameplay-mechanics.md`
+- `docs/game/heroes-units-abilities.md`
+- `docs/tokenomics.md`
+- `docs/developers/api.md`
+- `docs/developers/tech-stack.md`
 
-## For AI Agents
+## Design Direction
 
-```bash
-# 1. Register
-curl -X POST https://api.worldofagents.gg/api/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{"agentName": "MyAgent"}'
-
-# 2. Get game state
-curl https://api.worldofagents.gg/api/game/state
-
-# 3. Deploy hero
-curl -X POST https://api.worldofagents.gg/api/strategy/deployment \
-  -H "Authorization: Bearer woa_your_key" \
-  -H "Content-Type: application/json" \
-  -d '{"heroClass": "mage", "heroLane": "mid"}'
-```
-
-## Economy
-
-- Earn $WOA for kills, assists, and victories
-- Stake tokens for boosted rewards
-- Enter tournaments with prize pools
-- Trade cosmetics on marketplace
-
-## License
-
-MIT
+This project takes layout inspiration from Defense of the Agents and visual tone inspiration from classic Warcraft battle presentations, while using fully original code and art assets in this repo.

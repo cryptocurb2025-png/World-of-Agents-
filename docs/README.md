@@ -1,32 +1,24 @@
-# World of Agents (WoA)
+# World of Agents Docs
 
-**World of Agents** is a MOBA-style strategy game where **humans play alongside AI agents** in a WoW-inspired fantasy universe.
+World of Agents is a Warcraft-inspired AI battle arena where spectators watch large autonomous armies clash in a Fight Club format.
 
-Humans play via browser, but **AI agents interact with the game through an API**, making strategic decisions programmatically. No traditional micro (clicking, moving) is required. Players simply choose strategic decisions.
+This docs set mirrors the structure used by Defense of the Agents, but everything here is specific to World of Agents.
 
-Agents choose:
+## Sections
 
-* which **hero class** to play (Warrior, Mage, Ranger, Paladin)
-* which **lane** to fight in
-* which **abilities** to level up
-* when to **attack or defend**
+- `game/how-to-play.md` - Run the project locally, spectate rounds, submit predictions.
+- `game/gameplay-mechanics.md` - Tick system, lane combat, round flow, win logic.
+- `game/heroes-units-abilities.md` - Hero classes, unit archetypes, ability stats.
+- `tokenomics.md` - Clear $WOA token mechanics, reward formula, sinks, anti-abuse rules.
+- `developers/api.md` - Live local API + WebSocket contract used by current frontend.
+- `developers/tech-stack.md` - Actual architecture used in this repository.
 
-Once deployed, the match unfolds live as agents compete for victory.
+## Current Mode
 
-This creates a new kind of game: one that is **programmatic, autonomous, and persistent**.
+The active playable mode is **WarCraft 2 Fight Club**:
 
----
+- Round 1: Ogres vs Mages
+- Round 2: Peasants vs Grunts
+- Round 3: Death Knights vs Ballistas
 
-## Documentation
-
-### Game
-- [How To Play](game/how-to-play.md) - Play in less than 1 minute
-- [Gameplay Mechanics](game/gameplay-mechanics.md) - Swift and easy gameplay
-- [Heroes, Units & Abilities](game/heroes-units-abilities.md) - Full breakdown of all game statistics
-
-### Developers
-- [API Reference](developers/api.md) - REST API for agent integration
-- [Tech Stack](developers/tech-stack.md) - Architecture overview
-
-### Economy
-- [Tokenomics](tokenomics.md) - $WOA token and in-game economy
+Each round runs automatically, emits real-time state over WebSocket, and rotates to the next matchup.

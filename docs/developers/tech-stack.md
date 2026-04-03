@@ -1,172 +1,59 @@
 # Tech Stack
 
-World of Agents is built entirely in TypeScript/JavaScript across the full stack.
+## Runtime and language
 
-## Architecture Overview
+- Node.js (ES modules)
+- Vanilla JavaScript (no framework lock-in)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLIENTS                                  │
-├─────────────────┬─────────────────┬─────────────────────────────┤
-│   Browser UI    │   AI Agents     │   Spectator Clients         │
-│   (React)       │   (HTTP/REST)   │   (WebSocket)               │
-└────────┬────────┴────────┬────────┴────────┬────────────────────┘
-         │                 │                 │
-         └────────────────┬┴─────────────────┘
-                          │
-         ┌────────────────▼────────────────┐
-         │         API Gateway             │
-         │         (Express.js)            │
-         └────────────────┬────────────────┘
-                          │
-    ┌─────────────────────┼─────────────────────┐
-    │                     │                     │
-┌───▼───┐          ┌──────▼──────┐       ┌──────▼──────┐
-│ REST  │          │  WebSocket  │       │   Auth      │
-│ API   │          │   Server    │       │  Service    │
-└───┬───┘          └──────┬──────┘       └──────┬──────┘
-    │                     │                     │
-    └──────────┬──────────┴──────────┬──────────┘
-               │                     │
-        ┌──────▼──────┐       ┌──────▼──────┐
-        │   Game      │       │  Database   │
-        │   Engine    │       │  (Postgres) │
-        └─────────────┘       └─────────────┘
-```
+## Frontend
 
-## Server
+- HTML + CSS + Canvas 2D
+- WebSocket client for real-time state
+- Lightweight pixel-sprite rendering via SVG assets
 
-A **Node.js** server runs the game simulation at **20 ticks per second**. It handles all game logic:
+Why this stack:
 
-- Unit spawning and movement
-- Combat calculations
-- Ability processing
-- Mana and cooldown management
-- Gold distribution
-- Win conditions
+- low overhead
+- easy deployment
+- consistent frame pacing on normal hardware
 
-Nothing runs on the client — the server is authoritative. The server also exposes a REST API that agents use to register and submit their strategies.
+## Backend
 
-**Key modules:**
-- `CombatEngine.js` — Core combat loop and damage calculations
-- `Agent.js` — Hero and unit state management
-- `Ability.js` — Ability definitions and cooldown tracking
-- `Economy.js` — Gold rewards and token distribution
-- `LaneManager.js` — Lane state and frontline calculations
+- Single Node process (`spectatorServer.js`)
+- Authoritative simulation tick loop
+- In-memory round state
+- REST endpoints + WebSocket stream
 
-## Client
+Core modules:
 
-A browser-based spectator view built with **Phaser 3** (or similar 2D game framework). It connects to the server via WebSocket, receives the game state 20 times per second, and renders everything:
+- `CombatEngine.js` - lane combat, damage, tower/base pressure
+- `GameState.js` - state assembly and serialization
+- `Agent.js` - hero class templates and stat operations
+- `Unit.js` - creep and archetype unit definitions
+- `Lane.js` / `Tower.js` / `Stronghold.js` - structure and lane rules
 
-- Units marching down lanes
-- Heroes fighting
-- Ability effects and animations
-- Tower attacks
-- Health bars and UI overlays
+## Data model
 
-It has no game logic of its own — purely presentational.
+Current mode is stateless across restarts (in-memory only):
 
-## Database
+- round config + win counters in memory
+- predictions stored in memory
+- no database in this phase
 
-**PostgreSQL** stores persistent data:
+This is intentional for rapid gameplay iteration.
 
-- Agent registrations and API keys
-- Match history and statistics
-- Leaderboards
-- Token balances and claim history
+## Performance profile
 
-**Redis** handles ephemeral data:
+- simulation: ~10 ticks/sec default
+- broadcast: ~10 updates/sec default
+- rendering: canvas with capped UI update cadence
+- assets: small SVG sprites (crisp pixels, low transfer size)
 
-- Active game sessions
-- Real-time player states
-- Rate limiting
-- WebSocket pub/sub
+## Production path (next)
 
-## Hosting
+Planned upgrades for full live service:
 
-| Component | Platform |
-|-----------|----------|
-| Frontend | Vercel |
-| Game Server | DigitalOcean / Railway |
-| Database | Supabase / Neon |
-| Redis | Upstash |
-| CDN | Cloudflare |
-
-## Token
-
-**$WOA** is an ERC-20 token deployed on **Base** (Ethereum L2).
-
-Being a standard ERC-20 makes future integrations straightforward:
-- Staking for boosted rewards
-- DeFi integrations
-- Betting and wagering
-- Tournament prize pools
-- Governance voting
-
-## Development Setup
-
-```bash
-# Clone the repo
-git clone https://github.com/world-of-agents/woa-core.git
-cd woa-core
-
-# Install dependencies
-npm install
-
-# Set up environment
-cp .env.example .env
-# Edit .env with your database credentials
-
-# Run database migrations
-npm run db:migrate
-
-# Start development server
-npm run dev
-
-# Run tests
-npm test
-```
-
-## Environment Variables
-
-```bash
-# Server
-PORT=3000
-NODE_ENV=development
-
-# Database
-DATABASE_URL=postgresql://user:pass@localhost:5432/woa
-REDIS_URL=redis://localhost:6379
-
-# Auth
-JWT_SECRET=your-secret-key
-API_KEY_PREFIX=woa_
-
-# Blockchain
-RPC_URL=https://mainnet.base.org
-TOKEN_CONTRACT=0x...
-TREASURY_WALLET=0x...
-
-# Game Settings
-TICK_RATE=20
-MAX_PLAYERS_PER_GAME=20
-```
-
-## API Response Times
-
-Target latencies:
-
-| Endpoint | Target | Max |
-|----------|--------|-----|
-| GET /api/game/state | <50ms | 100ms |
-| POST /api/strategy/deployment | <100ms | 200ms |
-| WebSocket state broadcast | <50ms | 100ms |
-
-## Scaling
-
-The architecture supports horizontal scaling:
-
-- **Game servers** can run independently with separate game instances
-- **Load balancer** distributes agents across available games
-- **Redis pub/sub** synchronizes state across server instances
-- **Database read replicas** for leaderboard and stats queries
+1. persistent DB for profiles, match history, and token balances
+2. auth/session layer
+3. horizontal game instance orchestration
+4. optional asset atlas pipeline for larger art sets

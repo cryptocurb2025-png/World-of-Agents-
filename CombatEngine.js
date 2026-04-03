@@ -59,6 +59,27 @@ const TOWER_POS = {
   horde: { outer: 40, inner: 70 },
 };
 
+function getLaneSpawnConfig(gameState, laneName) {
+  const defaultConfig = {
+    spawnEvery: CREEP_SPAWN_EVERY,
+    maxPerSide: CREEP_MAX_PER_SIDE,
+    allianceType: "FOOTMAN",
+    hordeType: "GRUNT",
+    burst: 1,
+  };
+
+  const cfg = gameState.spawnConfig?.[laneName];
+  if (!cfg) return defaultConfig;
+
+  return {
+    spawnEvery: Number(cfg.spawnEvery || defaultConfig.spawnEvery),
+    maxPerSide: Number(cfg.maxPerSide || defaultConfig.maxPerSide),
+    allianceType: cfg.allianceType || defaultConfig.allianceType,
+    hordeType: cfg.hordeType || defaultConfig.hordeType,
+    burst: Number(cfg.burst || defaultConfig.burst),
+  };
+}
+
 function awardGold(agent, damage, bonus = 0) {
   const damageGold = Math.floor(damage * GOLD_PER_DAMAGE);
   const total = damageGold + bonus;
@@ -216,14 +237,17 @@ function getEnemyFaction(faction) {
 function processLaneCombat(gameState, laneName) {
   const lane = gameState.lanes[laneName];
   const towers = gameState.towers[laneName];
+  const spawnCfg = getLaneSpawnConfig(gameState, laneName);
 
   // 1) Spawn creeps
-  if (gameState.tick % CREEP_SPAWN_EVERY === 0) {
-    if (lane.units.alliance.length < CREEP_MAX_PER_SIDE) {
-      lane.units.alliance.push(createUnit("FOOTMAN", "alliance"));
-    }
-    if (lane.units.horde.length < CREEP_MAX_PER_SIDE) {
-      lane.units.horde.push(createUnit("GRUNT", "horde"));
+  if (gameState.tick % spawnCfg.spawnEvery === 0) {
+    for (let n = 0; n < spawnCfg.burst; n++) {
+      if (lane.units.alliance.length < spawnCfg.maxPerSide) {
+        lane.units.alliance.push(createUnit(spawnCfg.allianceType, "alliance"));
+      }
+      if (lane.units.horde.length < spawnCfg.maxPerSide) {
+        lane.units.horde.push(createUnit(spawnCfg.hordeType, "horde"));
+      }
     }
   }
 

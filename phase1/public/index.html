@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>World of Agents - Phase 1</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <div class="brand__title">World of Agents</div>
+        <div class="brand__sub">Phase 1 Duel: Warrior vs Mage</div>
+      </div>
+      <div class="conn">
+        <span class="conn__label">WS</span>
+        <span id="status" class="pill pill--warn">connecting</span>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="arena">
+        <div class="hero" id="hero-warrior">
+          <div class="hero__head">
+            <div>
+              <div class="hero__name">Theron</div>
+              <div class="hero__class">Warrior</div>
+            </div>
+            <div class="hero__vitals" id="warrior-vitals">-</div>
+          </div>
+          <div class="bars">
+            <div class="bar bar--hp"><div id="warrior-hp" class="bar__fill"></div></div>
+            <div class="bar bar--mana"><div id="warrior-mana" class="bar__fill"></div></div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="warrior-cast">Shield Slam</button>
+            <div class="hint" id="warrior-hint">-</div>
+          </div>
+        </div>
+
+        <div class="vs">VS</div>
+
+        <div class="hero" id="hero-mage">
+          <div class="hero__head">
+            <div>
+              <div class="hero__name">Seraphina</div>
+              <div class="hero__class">Mage</div>
+            </div>
+            <div class="hero__vitals" id="mage-vitals">-</div>
+          </div>
+          <div class="bars">
+            <div class="bar bar--hp"><div id="mage-hp" class="bar__fill"></div></div>
+            <div class="bar bar--mana"><div id="mage-mana" class="bar__fill"></div></div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="mage-cast">Fireball</button>
+            <div class="hint" id="mage-hint">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="log">
+        <div class="log__head">
+          <div class="log__title">Combat Log</div>
+          <div id="meta" class="log__meta">-</div>
+        </div>
+        <div id="log" class="log__body"></div>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

@@ -1,11 +1,3 @@
-/**
- * World of Agents - Bit 2
- * Minimal spectator server (single in-memory match)
- * - Runs the simulation loop continuously
- * - Exposes GET /api/state returning current game snapshot
- * - Serves ./public for a placeholder page
- */
-
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
@@ -13,59 +5,235 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 
 import { createAgent } from "./Agent.js";
-import {
-  createGameState,
-  addHeroToGame,
-  moveHeroToLane,
-  getFullGameStatus,
-} from "./GameState.js";
+import { createGameState, addHeroToGame, getFullGameStatus } from "./GameState.js";
 import { processTick } from "./CombatEngine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 3000);
-const TICK_RATE = Number(process.env.TICK_RATE || 10); // ticks/sec
-const BROADCAST_RATE = Number(process.env.BROADCAST_RATE || 5); // updates/sec
+const TICK_RATE = Number(process.env.TICK_RATE || 10);
+const BROADCAST_RATE = Number(process.env.BROADCAST_RATE || 10);
 
-// --- Game setup (single match) ---
-const gameState = createGameState();
+const FIGHT_CLUB_ROUNDS = [
+  {
+    id: "ogres-vs-mages",
+    title: "Round 1: Ogres vs Mages",
+    subtitle: "Brutality vs Polymorph trickery",
+    durationTicks: 520,
+    spawnConfig: {
+      top: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+      mid: { spawnEvery: 2, maxPerSide: 48, burst: 2, allianceType: "OGRE", hordeType: "BATTLE_MAGE" },
+      bot: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+    },
+    allianceHero: {
+      name: "Drokhan Ogre Chief",
+      classType: "WARRIOR",
+      lane: "mid",
+      hpScale: 1.45,
+      damageScale: 1.35,
+      manaScale: 0.8,
+    },
+    hordeHero: {
+      name: "Archmage Selindra",
+      classType: "MAGE",
+      lane: "mid",
+      hpScale: 1.0,
+      damageScale: 1.5,
+      manaScale: 1.3,
+    },
+  },
+  {
+    id: "peasants-vs-grunts",
+    title: "Round 2: Peasants vs Grunts",
+    subtitle: "Numbers and grit against raw Orc power",
+    durationTicks: 520,
+    spawnConfig: {
+      top: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+      mid: { spawnEvery: 2, maxPerSide: 64, burst: 3, allianceType: "PEASANT", hordeType: "GRUNT" },
+      bot: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+    },
+    allianceHero: {
+      name: "Foreman Brigg",
+      classType: "HEALER",
+      lane: "mid",
+      hpScale: 1.1,
+      damageScale: 1.0,
+      manaScale: 1.25,
+    },
+    hordeHero: {
+      name: "Gor'mak Warleader",
+      classType: "RANGER",
+      lane: "mid",
+      hpScale: 1.35,
+      damageScale: 1.35,
+      manaScale: 0.9,
+    },
+  },
+  {
+    id: "dk-vs-ballistas",
+    title: "Round 3: Death Knights vs Ballistas",
+    subtitle: "Dark riders charging through siege volleys",
+    durationTicks: 560,
+    spawnConfig: {
+      top: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+      mid: { spawnEvery: 1, maxPerSide: 72, burst: 4, allianceType: "DEATH_KNIGHT", hordeType: "BALLISTA" },
+      bot: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+    },
+    allianceHero: {
+      name: "Morvane the Fallen",
+      classType: "WARRIOR",
+      lane: "mid",
+      hpScale: 1.6,
+      damageScale: 1.4,
+      manaScale: 1.0,
+    },
+    hordeHero: {
+      name: "Iron Siege Marshal",
+      classType: "MAGE",
+      lane: "mid",
+      hpScale: 1.15,
+      damageScale: 1.2,
+      manaScale: 1.4,
+    },
+  },
+];
 
-// Alliance
-const warrior = createAgent("Theron the Ironclad", "WARRIOR");
-const mage = createAgent("Seraphina the Arcane", "MAGE");
+const fightClub = {
+  roundIndex: 0,
+  wins: { alliance: 0, horde: 0 },
+  history: [],
+  predictions: Object.fromEntries(FIGHT_CLUB_ROUNDS.map((r) => [r.id, { alliance: 0, horde: 0 }])),
+};
 
-// Horde
-const ranger = createAgent("Grommak the Hunter", "RANGER");
-const healer = createAgent("Zul'jin the Wise", "HEALER");
+let gameState = initRoundState(fightClub.roundIndex);
 
-addHeroToGame(gameState, warrior, "alliance", "top");
-addHeroToGame(gameState, mage, "alliance", "mid");
-addHeroToGame(gameState, ranger, "horde", "mid");
-addHeroToGame(gameState, healer, "horde", "bot");
+function initRoundState(index) {
+  const round = FIGHT_CLUB_ROUNDS[index];
+  const state = createGameState(`fightclub_${round.id}_${Date.now()}`);
+  state.spawnConfig = round.spawnConfig;
 
-// Simple built-in rotations so the state changes
-function maybeRotateHeroes() {
-  if (gameState.tick === 0) return;
-  if (gameState.tick % 15 !== 0) return;
+  const allianceHero = createScaledHero(round.allianceHero);
+  const hordeHero = createScaledHero(round.hordeHero);
 
-  const lanes = ["top", "mid", "bot"];
-  const randomLane = lanes[Math.floor(Math.random() * lanes.length)];
+  addHeroToGame(state, allianceHero, "alliance", round.allianceHero.lane || "mid");
+  addHeroToGame(state, hordeHero, "horde", round.hordeHero.lane || "mid");
 
-  if (warrior.hp > 0 && warrior.lane !== randomLane) {
-    moveHeroToLane(gameState, warrior, randomLane);
+  return state;
+}
+
+function createScaledHero(def) {
+  const hero = createAgent(def.name, def.classType);
+  hero.maxHp = Math.floor(hero.maxHp * (def.hpScale || 1));
+  hero.hp = hero.maxHp;
+  hero.damage = Math.max(1, Math.floor(hero.damage * (def.damageScale || 1)));
+  hero.maxMana = Math.floor(hero.maxMana * (def.manaScale || 1));
+  hero.mana = hero.maxMana;
+  return hero;
+}
+
+function finalizeRoundAndAdvance() {
+  const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
+  const winner = resolveRoundWinner(gameState);
+
+  if (winner === "alliance" || winner === "horde") {
+    fightClub.wins[winner]++;
   }
-  if (ranger.hp > 0 && ranger.lane !== warrior.lane) {
-    moveHeroToLane(gameState, ranger, warrior.lane);
+
+  fightClub.history.push({
+    roundId: round.id,
+    title: round.title,
+    winner,
+    tick: gameState.tick,
+    endedAt: new Date().toISOString(),
+  });
+
+  if (fightClub.history.length > 12) {
+    fightClub.history = fightClub.history.slice(-12);
   }
+
+  fightClub.roundIndex = (fightClub.roundIndex + 1) % FIGHT_CLUB_ROUNDS.length;
+  gameState = initRoundState(fightClub.roundIndex);
+}
+
+function resolveRoundWinner(state) {
+  if (state.winner) return state.winner;
+
+  const aBase = state.strongholds.alliance.hp;
+  const hBase = state.strongholds.horde.hp;
+  if (aBase > hBase) return "alliance";
+  if (hBase > aBase) return "horde";
+
+  const aTower = aliveTowers(state, "alliance");
+  const hTower = aliveTowers(state, "horde");
+  if (aTower > hTower) return "alliance";
+  if (hTower > aTower) return "horde";
+
+  const aArmy = totalArmyPower(state, "alliance");
+  const hArmy = totalArmyPower(state, "horde");
+  if (aArmy > hArmy) return "alliance";
+  if (hArmy > aArmy) return "horde";
+
+  return "draw";
+}
+
+function aliveTowers(state, faction) {
+  let count = 0;
+  for (const laneName of ["top", "mid", "bot"]) {
+    for (const tower of state.towers[laneName][faction]) {
+      if (tower.alive) count++;
+    }
+  }
+  return count;
+}
+
+function totalArmyPower(state, faction) {
+  let unitCount = 0;
+  for (const laneName of ["top", "mid", "bot"]) {
+    unitCount += state.lanes[laneName].units[faction].length;
+  }
+  let heroHp = 0;
+  for (const hero of state.heroes[faction]) {
+    heroHp += hero.hp;
+  }
+  return unitCount * 10 + heroHp;
+}
+
+function getFightClubSummary() {
+  const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
+  const prediction = fightClub.predictions[round.id] || { alliance: 0, horde: 0 };
+  const totalPredictions = prediction.alliance + prediction.horde;
+  return {
+    round,
+    roundTick: gameState.tick,
+    rounds: FIGHT_CLUB_ROUNDS,
+    wins: fightClub.wins,
+    history: fightClub.history,
+    prediction: {
+      ...prediction,
+      total: totalPredictions,
+      alliancePct: totalPredictions ? Math.round((prediction.alliance / totalPredictions) * 100) : 50,
+      hordePct: totalPredictions ? Math.round((prediction.horde / totalPredictions) * 100) : 50,
+    },
+  };
+}
+
+function getSpectatorState() {
+  return {
+    ...getFullGameStatus(gameState),
+    fightClub: getFightClubSummary(),
+  };
 }
 
 setInterval(() => {
   processTick(gameState);
-  maybeRotateHeroes();
+  const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
+
+  if (gameState.winner || gameState.tick >= round.durationTicks) {
+    finalizeRoundAndAdvance();
+  }
 }, Math.floor(1000 / TICK_RATE));
 
-// --- HTTP server ---
 const publicDir = path.join(__dirname, "public");
 
 function sendJson(res, statusCode, obj) {
@@ -86,7 +254,6 @@ function sendText(res, statusCode, text) {
 }
 
 function safeResolvePublicPath(urlPath) {
-  // Basic directory traversal protection.
   const decoded = decodeURIComponent(urlPath);
   const cleaned = decoded.replace(/\0/g, "");
   const joined = path.join(publicDir, cleaned);
@@ -94,29 +261,66 @@ function safeResolvePublicPath(urlPath) {
   return joined;
 }
 
-const server = http.createServer((req, res) => {
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 8 * 1024) {
+        reject(new Error("Payload too large"));
+      }
+    });
+    req.on("end", () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error("Invalid JSON"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   if (!req.url) return sendText(res, 400, "Bad Request");
 
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = url.pathname;
 
   if (req.method === "GET" && pathname === "/api/state") {
-    return sendJson(res, 200, getFullGameStatus(gameState));
+    return sendJson(res, 200, getSpectatorState());
+  }
+
+  if (req.method === "GET" && pathname === "/api/fightclub") {
+    return sendJson(res, 200, getFightClubSummary());
+  }
+
+  if (req.method === "POST" && pathname === "/api/predict") {
+    try {
+      const body = await readJsonBody(req);
+      const pick = String(body.pick || "").toLowerCase();
+      if (pick !== "alliance" && pick !== "horde") {
+        return sendJson(res, 400, { error: "pick must be 'alliance' or 'horde'" });
+      }
+      const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
+      fightClub.predictions[round.id][pick]++;
+      return sendJson(res, 200, { ok: true, fightClub: getFightClubSummary() });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
   }
 
   if (req.method !== "GET") {
     return sendText(res, 405, "Method Not Allowed");
   }
 
-  // Serve placeholder spectator page
   const targetPath = pathname === "/" ? "/index.html" : pathname;
   const resolved = safeResolvePublicPath(targetPath);
   if (!resolved) return sendText(res, 403, "Forbidden");
 
   fs.readFile(resolved, (err, data) => {
-    if (err) {
-      return sendText(res, 404, "Not Found");
-    }
+    if (err) return sendText(res, 404, "Not Found");
 
     const ext = path.extname(resolved).toLowerCase();
     const type =
@@ -126,7 +330,9 @@ const server = http.createServer((req, res) => {
           ? "text/javascript; charset=utf-8"
           : ext === ".css"
             ? "text/css; charset=utf-8"
-            : "application/octet-stream";
+            : ext === ".svg"
+              ? "image/svg+xml"
+              : "application/octet-stream";
 
     res.writeHead(200, {
       "Content-Type": type,
@@ -136,8 +342,6 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// --- WebSocket spectator stream ---
-// We use a single WS server, broadcasting the latest snapshot at a fixed rate.
 const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
@@ -157,23 +361,20 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 wss.on("connection", (ws) => {
-  // Send an initial snapshot immediately.
-  ws.send(
-    JSON.stringify({ type: "state", data: getFullGameStatus(gameState) })
-  );
+  ws.send(JSON.stringify({ type: "state", data: getSpectatorState() }));
 });
 
 setInterval(() => {
-  const payload = JSON.stringify({ type: "state", data: getFullGameStatus(gameState) });
+  const payload = JSON.stringify({ type: "state", data: getSpectatorState() });
   for (const ws of wss.clients) {
     if (ws.readyState === ws.OPEN) ws.send(payload);
   }
 }, Math.floor(1000 / BROADCAST_RATE));
 
 server.listen(PORT, () => {
-  // Keep console output minimal for now.
-  console.log(`World of Agents spectator server running:`);
+  console.log("World of Agents Fight Club server running:");
   console.log(`  http://localhost:${PORT}`);
   console.log(`  http://localhost:${PORT}/api/state`);
+  console.log(`  http://localhost:${PORT}/api/fightclub`);
   console.log(`  ws://localhost:${PORT}/ws`);
 });

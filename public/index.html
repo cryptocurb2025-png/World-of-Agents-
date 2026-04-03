@@ -28,6 +28,23 @@
       <div class="hud">
         <div id="tick" class="tick">Tick: -</div>
 
+        <section class="fightClub" aria-label="Fight Club Round">
+          <div class="fightClub__main">
+            <div class="fightClub__kicker">Warcraft-Style Fight Club</div>
+            <div id="round-title" class="fightClub__title">Round loading...</div>
+            <div id="round-subtitle" class="fightClub__sub">-</div>
+            <div id="round-meta" class="fightClub__meta">-</div>
+          </div>
+          <div class="fightClub__predict">
+            <div class="fightClub__predictTitle">Predict Winner</div>
+            <div class="predictButtons">
+              <button id="predict-alliance" class="predictBtn predictBtn--alliance" type="button">Alliance</button>
+              <button id="predict-horde" class="predictBtn predictBtn--horde" type="button">Horde</button>
+            </div>
+            <div id="prediction-stats" class="predictionStats">Votes: -</div>
+          </div>
+        </section>
+
         <section class="bases" aria-label="Strongholds">
           <div class="base base--alliance" id="base-alliance">
             <div class="base__head">
@@ -58,11 +75,12 @@
             </header>
 
             <div class="mapWrap" aria-label="Battle Map">
-              <canvas id="battlemap" class="map" width="980" height="420"></canvas>
+              <canvas id="battlemap" class="map" width="980" height="420" style="background-color: #07070a;"></canvas>
               <div class="mapLegend">
                 <span class="legendDot legendDot--alliance"></span> Alliance
                 <span class="legendDot legendDot--horde"></span> Horde
                 <span class="legendDot legendDot--hero"></span> Hero
+                <span class="legendDot legendDot--fx"></span> Spell FX
               </div>
             </div>
 
@@ -78,11 +96,17 @@
               <div class="lane__heroes">
                 <div class="slot slot--alliance">
                   <div class="slot__label">Alliance</div>
-                  <div class="slot__value" id="lane-top-hero-alliance">-</div>
+                  <div class="slot__value" id="lane-top-hero-alliance">
+                    <img class="unitIcon unitIcon--alliance" id="lane-top-hero-alliance-icon" src="/assets/heroes/hero-placeholder.svg" alt="" width="28" height="28" />
+                    <span class="unitName" id="lane-top-hero-alliance-name">-</span>
+                  </div>
                 </div>
                 <div class="slot slot--horde">
                   <div class="slot__label">Horde</div>
-                  <div class="slot__value" id="lane-top-hero-horde">-</div>
+                  <div class="slot__value" id="lane-top-hero-horde">
+                    <img class="unitIcon unitIcon--horde" id="lane-top-hero-horde-icon" src="/assets/units/ogre-placeholder.svg" alt="" width="28" height="28" />
+                    <span class="unitName" id="lane-top-hero-horde-name">-</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -99,11 +123,17 @@
               <div class="lane__heroes">
                 <div class="slot slot--alliance">
                   <div class="slot__label">Alliance</div>
-                  <div class="slot__value" id="lane-mid-hero-alliance">-</div>
+                  <div class="slot__value" id="lane-mid-hero-alliance">
+                    <img class="unitIcon unitIcon--alliance" id="lane-mid-hero-alliance-icon" src="/assets/heroes/hero-placeholder.svg" alt="" width="28" height="28" />
+                    <span class="unitName" id="lane-mid-hero-alliance-name">-</span>
+                  </div>
                 </div>
                 <div class="slot slot--horde">
                   <div class="slot__label">Horde</div>
-                  <div class="slot__value" id="lane-mid-hero-horde">-</div>
+                  <div class="slot__value" id="lane-mid-hero-horde">
+                    <img class="unitIcon unitIcon--horde" id="lane-mid-hero-horde-icon" src="/assets/units/ogre-placeholder.svg" alt="" width="28" height="28" />
+                    <span class="unitName" id="lane-mid-hero-horde-name">-</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -120,11 +150,17 @@
               <div class="lane__heroes">
                 <div class="slot slot--alliance">
                   <div class="slot__label">Alliance</div>
-                  <div class="slot__value" id="lane-bot-hero-alliance">-</div>
+                  <div class="slot__value" id="lane-bot-hero-alliance">
+                    <img class="unitIcon unitIcon--alliance" id="lane-bot-hero-alliance-icon" src="/assets/heroes/hero-placeholder.svg" alt="" width="28" height="28" />
+                    <span class="unitName" id="lane-bot-hero-alliance-name">-</span>
+                  </div>
                 </div>
                 <div class="slot slot--horde">
                   <div class="slot__label">Horde</div>
-                  <div class="slot__value" id="lane-bot-hero-horde">-</div>
+                  <div class="slot__value" id="lane-bot-hero-horde">
+                    <img class="unitIcon unitIcon--horde" id="lane-bot-hero-horde-icon" src="/assets/units/ogre-placeholder.svg" alt="" width="28" height="28" />
+                    <span class="unitName" id="lane-bot-hero-horde-name">-</span>
+                  </div>
                 </div>
               </div>
             </div>

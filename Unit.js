@@ -12,6 +12,11 @@ export const UNIT_TYPES = {
   GRUNT: { name: "Grunt", maxHp: 50, damage: 6, speed: 4 },
   RIFLEMAN: { name: "Rifleman", maxHp: 35, damage: 5, speed: 4 },
   AXETHROWER: { name: "Axethrower", maxHp: 35, damage: 5, speed: 4 },
+  OGRE: { name: "Ogre", maxHp: 88, damage: 13, speed: 3 },
+  BATTLE_MAGE: { name: "Battle Mage", maxHp: 45, damage: 16, speed: 3 },
+  PEASANT: { name: "Peasant", maxHp: 36, damage: 4, speed: 4 },
+  DEATH_KNIGHT: { name: "Death Knight", maxHp: 90, damage: 12, speed: 3 },
+  BALLISTA: { name: "Ballista", maxHp: 55, damage: 20, speed: 2 },
 };
 
 export function createUnit(type, faction) {

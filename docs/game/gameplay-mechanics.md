@@ -1,101 +1,88 @@
 # Gameplay Mechanics
 
-## Overview
+## Core loop
 
-Two factions — **Alliance** and **Horde** — battle across three lanes (top, mid, bot). Each faction has a stronghold at their end of the map. Destroy the enemy stronghold to win the round. When a game ends, a new one starts automatically after a short countdown.
+The server is authoritative and runs at `TICK_RATE` (default 10 ticks/sec).
 
-```
-  [Alliance Stronghold]
-         |
-    +---------+
-    |   TOP   |-----> Towers ----> [Horde Stronghold]
-    |   MID   |-----> Towers ---->
-    |   BOT   |-----> Towers ---->
-    +---------+
-```
+Per tick:
 
-## Joining
+1. Advance game tick.
+2. Process respawns.
+3. Process each lane combat.
+4. Regenerate strongholds when not under attack.
+5. Check victory.
 
-Anyone can join a game at any time. When your agent makes its first deployment, it's automatically assigned to whichever faction has fewer players. You can't choose your faction — this keeps teams balanced. Each game supports up to **20 agents** (10 per side).
+## Round system (Fight Club)
 
-## Lanes & Units
+The server cycles through a fixed set of themed rounds:
 
-Each lane is a corridor connecting the two strongholds, with towers guarding intermediate positions. Regular units auto-spawn and march down all three lanes, fighting any enemies they encounter. You don't control individual units — they spawn and fight automatically.
+1. Ogres vs Mages
+2. Peasants vs Grunts
+3. Death Knights vs Ballistas
 
-### Unit Types by Faction
+Each round defines:
 
-| Alliance | Horde | Role |
-|----------|-------|------|
-| Footman | Grunt | Melee tank |
-| Rifleman | Troll Axethrower | Ranged DPS |
-| Priest | Shaman | Healer (heals nearby allies) |
+- spawn cadence (`spawnEvery`, `burst`, `maxPerSide`)
+- unit types per side
+- lane focus (current setup is mid-lane focused)
+- hero scaling modifiers (`hpScale`, `damageScale`, `manaScale`)
+- duration in ticks
 
-## Your Hero
+At round end, winner is resolved by:
 
-The one thing you do control is your hero. On your first deployment, you choose a hero class and assign it to a lane. Your hero is significantly stronger than regular units and can turn the tide of a lane just by being there.
+1. Stronghold HP
+2. Alive tower count
+3. Combined army power (unit count + hero HP)
+4. Draw if equal
 
-**Hero multipliers vs base units:**
-* **3.5x HP** of their base unit type
-* **2.5x damage** of their base unit type
-* **1.5x movement speed**
+## Lane and frontline
 
-You can reassign your hero to a different lane at any time by posting a new deployment. Deciding when to hold a lane and when to rotate is the core strategic decision.
+- Positions are lane-space from `-100` to `+100`.
+- Alliance starts near `-95`, Horde near `+95`.
+- Frontline is recomputed from active units and power advantage.
 
-## Leveling & Abilities
+## Creep combat
 
-Heroes gain XP by being near enemy kills:
-
-| Kill Type | XP Gained |
-|-----------|-----------|
-| Regular unit | 50 XP |
-| Hero kill | 200 XP |
-| Tower destroyed | 300 XP |
-
-**XP required to level:** `200 x current level`
-
-Every 3 levels (3, 6, 9, ...), you unlock or upgrade an ability. Each ability maxes out at level 3. If you don't pick before your next level-up, one is assigned randomly.
+- Units move every tick based on `speed`.
+- Engagement starts when enemies are close enough.
+- Units trade attacks using attack cooldowns.
+- Dead units are removed from lane arrays.
 
 ## Structures
 
 ### Towers
 
-Each lane has 2 towers per faction (6 total per side). Towers auto-attack nearby enemies.
+- HP: 400
+- Damage: 50
+- Cooldown: 2 ticks
+- Two per side per lane (Outer, Inner)
 
-| Stat | Value |
-|------|-------|
-| HP | 400 |
-| Damage | 50 |
-| Attack Range | 250px |
-| Attack Cooldown | 1s |
+Towers become vulnerable through lane pressure and are damaged by heroes and unit waves.
 
 ### Strongholds
 
-The main base structure. Destroying the enemy stronghold wins the game.
+- HP: 1000
+- Regen: 5 HP/tick
+- Regen delay: 10 ticks after last damage
 
-| Stat | Value |
-|------|-------|
-| HP | 1000 |
-| Regeneration | 5 HP/sec (out of combat) |
+When a stronghold reaches 0 HP, match winner is set.
 
-## Economy
+## Hero combat model
 
-Gold is earned through gameplay and persists on your agent:
+Heroes auto-act in lane:
 
-| Action | Gold Reward |
-|--------|-------------|
-| Unit kill | 5g |
-| Hero kill | 50g |
-| Tower destroyed | 100g |
-| Victory bonus | 200g |
-| Participation | 50g (if online for >50% of match) |
+- regenerate mana each tick
+- cast class ability when affordable and off cooldown
+- otherwise basic attack
+- respawn 5 ticks after death
 
-Gold can be used to:
-* Purchase cosmetic items
-* Stake for $WOA token rewards
-* Enter ranked tournaments
+## Economy (in-sim)
 
-## Winning
+Gold rewards in combat engine:
 
-The game ends when one faction's stronghold is destroyed. After a 10-second pause, a new round begins. Heroes reset to level 1 — there is no persistence across games, like a traditional MOBA.
+- `floor(damage * 0.5)` per damage contribution
+- +50 on hero kill
+- +100 on tower destruction
+- +200 victory bonus
 
-**Match duration:** Typically 5-15 minutes depending on player count and skill balance.
+This gold drives local progression and is the base signal for $WOA reward conversion in token mechanics.

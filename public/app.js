@@ -1,11 +1,12 @@
-/**
- * World of Agents - Spectator Client (Bit 4B)
- * Connects to WebSocket and renders a lane board UI.
- */
-
 const el = {
   status: document.getElementById("status"),
   tick: document.getElementById("tick"),
+  roundTitle: document.getElementById("round-title"),
+  roundSubtitle: document.getElementById("round-subtitle"),
+  roundMeta: document.getElementById("round-meta"),
+  predictionStats: document.getElementById("prediction-stats"),
+  predictAlliance: document.getElementById("predict-alliance"),
+  predictHorde: document.getElementById("predict-horde"),
 
   baseAllianceHp: document.getElementById("base-alliance-hp"),
   baseHordeHp: document.getElementById("base-horde-hp"),
@@ -18,25 +19,28 @@ const el = {
   lanes: {
     top: {
       frontline: document.getElementById("lane-top-frontline"),
-      heroA: document.getElementById("lane-top-hero-alliance"),
-      heroH: document.getElementById("lane-top-hero-horde"),
-      bar: document.getElementById("lane-top-bar"),
+      heroAName: document.getElementById("lane-top-hero-alliance-name"),
+      heroAIcon: document.getElementById("lane-top-hero-alliance-icon"),
+      heroHName: document.getElementById("lane-top-hero-horde-name"),
+      heroHIcon: document.getElementById("lane-top-hero-horde-icon"),
       pin: document.getElementById("lane-top-pin"),
       root: document.getElementById("lane-top"),
     },
     mid: {
       frontline: document.getElementById("lane-mid-frontline"),
-      heroA: document.getElementById("lane-mid-hero-alliance"),
-      heroH: document.getElementById("lane-mid-hero-horde"),
-      bar: document.getElementById("lane-mid-bar"),
+      heroAName: document.getElementById("lane-mid-hero-alliance-name"),
+      heroAIcon: document.getElementById("lane-mid-hero-alliance-icon"),
+      heroHName: document.getElementById("lane-mid-hero-horde-name"),
+      heroHIcon: document.getElementById("lane-mid-hero-horde-icon"),
       pin: document.getElementById("lane-mid-pin"),
       root: document.getElementById("lane-mid"),
     },
     bot: {
       frontline: document.getElementById("lane-bot-frontline"),
-      heroA: document.getElementById("lane-bot-hero-alliance"),
-      heroH: document.getElementById("lane-bot-hero-horde"),
-      bar: document.getElementById("lane-bot-bar"),
+      heroAName: document.getElementById("lane-bot-hero-alliance-name"),
+      heroAIcon: document.getElementById("lane-bot-hero-alliance-icon"),
+      heroHName: document.getElementById("lane-bot-hero-horde-name"),
+      heroHIcon: document.getElementById("lane-bot-hero-horde-icon"),
       pin: document.getElementById("lane-bot-pin"),
       root: document.getElementById("lane-bot"),
     },
@@ -49,49 +53,42 @@ const el = {
 };
 
 let ws = null;
-
 let latestState = null;
 let rafScheduled = false;
 let lastPaint = 0;
-const PAINT_MIN_MS = 200; // cap UI updates to 5Hz
+const PAINT_MIN_MS = 80;
 
+const seenEventKeys = new Set();
 const map = createMapRenderer(el.canvas);
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${protocol}//${window.location.host}/ws`;
 
-  el.status.textContent = "Connecting...";
-  el.status.className = "connecting";
-
+  setConnection("Connecting...", "connecting");
   ws = new WebSocket(url);
 
-  ws.onopen = () => {
-    el.status.textContent = "Connected";
-    el.status.className = "connected";
-  };
-
+  ws.onopen = () => setConnection("Connected", "connected");
   ws.onclose = () => {
-    el.status.textContent = "Disconnected - reconnecting...";
-    el.status.className = "disconnected";
-    setTimeout(connect, 1500);
+    setConnection("Disconnected - reconnecting...", "disconnected");
+    setTimeout(connect, 1000);
   };
-
-  ws.onerror = () => {
-    el.status.textContent = "Error";
-    el.status.className = "error";
-  };
-
+  ws.onerror = () => setConnection("Error", "error");
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type !== "state") return;
       latestState = msg.data;
       schedulePaint();
-    } catch (e) {
+    } catch {
       // Ignore malformed payloads.
     }
   };
+}
+
+function setConnection(text, className) {
+  el.status.textContent = text;
+  el.status.className = className;
 }
 
 function schedulePaint() {
@@ -101,7 +98,6 @@ function schedulePaint() {
     rafScheduled = false;
     const now = performance.now();
     if (now - lastPaint < PAINT_MIN_MS) {
-      // Defer slightly to maintain the cap.
       setTimeout(schedulePaint, PAINT_MIN_MS);
       return;
     }
@@ -110,13 +106,12 @@ function schedulePaint() {
   });
 }
 
-function pctFromFrontline(frontline) {
-  // -100..+100 => 0..100
-  return clamp(((frontline + 100) / 200) * 100, 0, 100);
-}
-
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
+}
+
+function pctFromFrontline(frontline) {
+  return clamp(((frontline + 100) / 200) * 100, 0, 100);
 }
 
 function setText(node, value) {
@@ -134,39 +129,73 @@ function setLeft(node, pct) {
   if (node.style.left !== next) node.style.left = next;
 }
 
-function render(state) {
-  // Top HUD
-  setText(
-    el.tick,
-    `Tick: ${state.tick} | Phase: ${state.phase}${state.winner ? ` | Winner: ${state.winner.toUpperCase()}` : ""}`
-  );
+function classSpritePath(heroClass, faction) {
+  const cls = String(heroClass || "").toUpperCase();
+  if (cls === "MAGE") return "/assets/units/battle-mage-pixel.svg";
+  if (cls === "RANGER") return "/assets/heroes/ranger-pixel.svg";
+  if (cls === "HEALER") return "/assets/heroes/healer-pixel.svg";
+  if (cls === "WARRIOR") return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/ogre-pixel.svg";
+  return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/grunt-pixel.svg";
+}
 
-  // Strongholds
+function unitSpritePath(type, faction) {
+  const t = String(type || "").toUpperCase();
+  if (t === "OGRE") return "/assets/units/ogre-pixel.svg";
+  if (t === "BATTLE_MAGE") return "/assets/units/battle-mage-pixel.svg";
+  if (t === "PEASANT") return "/assets/units/peasant-pixel.svg";
+  if (t === "GRUNT") return "/assets/units/grunt-pixel.svg";
+  if (t === "DEATH_KNIGHT") return "/assets/units/death-knight-pixel.svg";
+  if (t === "BALLISTA") return "/assets/units/ballista-pixel.svg";
+  if (t === "FOOTMAN") return "/assets/heroes/hero-placeholder.svg";
+  return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/grunt-pixel.svg";
+}
+
+function setHeroSlot(nameEl, iconEl, name, heroClass, faction) {
+  const hasName = Boolean(name);
+  setText(nameEl, hasName ? name : "-");
+  if (!iconEl) return;
+  const src = classSpritePath(heroClass, faction);
+  if (iconEl.getAttribute("src") !== src) iconEl.setAttribute("src", src);
+  iconEl.style.opacity = hasName ? "1" : "0.25";
+  iconEl.style.filter = hasName ? "none" : "grayscale(1)";
+}
+
+function render(state) {
+  const fightClub = state.fightClub || null;
+  setText(el.tick, `Tick ${state.tick} | ${state.phase.toUpperCase()}`);
+
+  if (fightClub) {
+    setText(el.roundTitle, fightClub.round.title);
+    setText(el.roundSubtitle, fightClub.round.subtitle);
+    setText(el.roundMeta, `Round Tick ${fightClub.roundTick}/${fightClub.round.durationTicks} | Score Alliance ${fightClub.wins.alliance} - Horde ${fightClub.wins.horde}`);
+    const p = fightClub.prediction;
+    setText(el.predictionStats, `Votes ${p.total} | Alliance ${p.alliancePct}% (${p.alliance}) | Horde ${p.hordePct}% (${p.horde})`);
+  }
+
   renderStronghold(state.strongholds.alliance, el.baseAllianceHp, el.baseAllianceBar);
   renderStronghold(state.strongholds.horde, el.baseHordeHp, el.baseHordeBar);
 
-  // Towers summary
   const aliveTowers = state.towers.filter((t) => t.alive).length;
   const aTowers = state.towers.filter((t) => t.alive && t.faction === "alliance").length;
   const hTowers = state.towers.filter((t) => t.alive && t.faction === "horde").length;
-  setText(el.towersSummary, `Towers: Alliance ${aTowers}/6 | Horde ${hTowers}/6 (Alive ${aliveTowers}/12)`);
+  setText(el.towersSummary, `Towers: Alliance ${aTowers}/6 | Horde ${hTowers}/6 | Alive ${aliveTowers}`);
 
-  // Lanes
-  renderLane("top", state.lanes.top);
-  renderLane("mid", state.lanes.mid);
-  renderLane("bot", state.lanes.bot);
-
-  // Hero roster
   const aHeroes = state.heroes.alliance;
   const hHeroes = state.heroes.horde;
-  setText(el.heroesSummary, `${aHeroes.length + hHeroes.length} total`);
+  const heroByName = new Map();
+  for (const h of aHeroes) heroByName.set(h.name, h);
+  for (const h of hHeroes) heroByName.set(h.name, h);
+
+  renderLane("top", state.lanes.top, heroByName);
+  renderLane("mid", state.lanes.mid, heroByName);
+  renderLane("bot", state.lanes.bot, heroByName);
+
+  setText(el.heroesSummary, `${aHeroes.length + hHeroes.length} heroes`);
   renderHeroCards(el.heroCardsAlliance, aHeroes, "alliance");
   renderHeroCards(el.heroCardsHorde, hHeroes, "horde");
-
-  // Events
   renderEvents(state.recentEvents || []);
 
-  // Canvas map
+  map.pushEvents(state);
   map.render(state);
 }
 
@@ -176,40 +205,41 @@ function renderStronghold(s, hpEl, barEl) {
   setWidth(barEl, clamp(pct, 0, 100));
 }
 
-function renderLane(key, lane) {
+function renderLane(key, lane, heroByName) {
   const laneEl = el.lanes[key];
   const pct = pctFromFrontline(lane.frontline);
 
   setLeft(laneEl.pin, pct);
-  setWidth(laneEl.bar, 100);
-
   setText(laneEl.frontline, `Frontline: ${lane.frontline} | ${lane.status}`);
-  setText(laneEl.heroA, lane.alliance.hero || "-");
-  setText(laneEl.heroH, lane.horde.hero || "-");
 
-  // Add a class based on advantage for subtle styling.
+  const allianceHero = lane.alliance.hero ? heroByName.get(lane.alliance.hero) : null;
+  const hordeHero = lane.horde.hero ? heroByName.get(lane.horde.hero) : null;
+  setHeroSlot(laneEl.heroAName, laneEl.heroAIcon, lane.alliance.hero, allianceHero?.class, "alliance");
+  setHeroSlot(laneEl.heroHName, laneEl.heroHIcon, lane.horde.hero, hordeHero?.class, "horde");
+
   laneEl.root.classList.toggle("lane--alliance", lane.frontline < -10);
   laneEl.root.classList.toggle("lane--horde", lane.frontline > 10);
   laneEl.root.classList.toggle("lane--even", lane.frontline >= -10 && lane.frontline <= 10);
 }
 
 function renderHeroCards(container, heroes, faction) {
-  // Small roster sizes: simplest is to re-render the column.
-  container.innerHTML = heroes
-    .map((h) => heroCardHtml(h, faction))
-    .join("");
+  container.innerHTML = heroes.map((h) => heroCardHtml(h, faction)).join("");
 }
 
 function heroCardHtml(h, faction) {
   const hpPct = h.maxHp > 0 ? clamp((h.hp / h.maxHp) * 100, 0, 100) : 0;
   const manaPct = h.maxMana > 0 ? clamp((h.mana / h.maxMana) * 100, 0, 100) : 0;
   const dead = h.alive ? "" : " hero--dead";
+  const portrait = classSpritePath(h.class, faction);
 
   return `
     <div class="hero hero--${faction}${dead}">
       <div class="hero__top">
-        <div class="hero__name">${escapeHtml(h.name)}</div>
-        <div class="hero__tag">${escapeHtml(h.class)} · ${escapeHtml(h.lane)}</div>
+        <img class="hero__portrait" src="${escapeHtml(portrait)}" alt="" width="28" height="28" />
+        <div>
+          <div class="hero__name">${escapeHtml(h.name)}</div>
+          <div class="hero__tag">${escapeHtml(h.class)} · ${escapeHtml(h.lane)}</div>
+        </div>
       </div>
       <div class="hero__bars">
         <div class="hbar hbar--hp"><div class="hbar__fill" style="width:${hpPct.toFixed(1)}%"></div></div>
@@ -250,7 +280,6 @@ function summarizeEvent(e) {
   if (e.type === "hero_kill") return `${e.killer} -> ${e.victim}`;
   if (e.type === "hero_respawn") return `${e.hero} @ ${e.lane}`;
   if (e.type === "tower_destroyed") return `${e.destroyer} destroyed ${e.tower}`;
-  if (e.type === "hero_moved") return `${e.hero}: ${e.from} -> ${e.to}`;
   if (e.type === "hero_joined") return `${e.hero} (${e.class}) @ ${e.lane}`;
   if (e.type === "game_over") return `Winner: ${e.winner}`;
   return Object.keys(e)
@@ -269,18 +298,43 @@ function escapeHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
-connect();
+function attachPredictionHandlers() {
+  el.predictAlliance?.addEventListener("click", () => submitPrediction("alliance"));
+  el.predictHorde?.addEventListener("click", () => submitPrediction("horde"));
+}
+
+async function submitPrediction(pick) {
+  try {
+    const res = await fetch("/api/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pick }),
+    });
+    if (!res.ok) return;
+    const payload = await res.json();
+    if (payload?.fightClub?.prediction) {
+      const p = payload.fightClub.prediction;
+      setText(el.predictionStats, `Votes ${p.total} | Alliance ${p.alliancePct}% (${p.alliance}) | Horde ${p.hordePct}% (${p.horde})`);
+    }
+  } catch {
+    // Ignore network failures.
+  }
+}
 
 function createMapRenderer(canvas) {
   const ctx = canvas.getContext("2d", { alpha: false });
   let cssW = 0;
   let cssH = 0;
+  const sprites = new Map();
+  const effects = [];
+  const arena = loadSprite("/assets/terrain/fightclub-arena.svg");
 
   function resizeToCss() {
     const parent = canvas.parentElement;
     if (!parent) return;
     const w = Math.max(320, Math.floor(parent.clientWidth));
-    const h = Math.max(220, Math.floor(Math.min(460, parent.clientWidth * 0.42)));
+    const viewTarget = Math.floor(window.innerHeight * 0.68);
+    const h = Math.max(260, Math.min(820, viewTarget));
     if (w === cssW && h === cssH) return;
     cssW = w;
     cssH = h;
@@ -290,16 +344,12 @@ function createMapRenderer(canvas) {
     canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
   }
 
-  window.addEventListener("resize", () => {
-    resizeToCss();
-  });
-
   function xFromPos(pos) {
-    const pad = 36;
-    const t = (pos + 100) / 200;
-    return pad + t * (cssW - pad * 2);
+    const pad = 32;
+    return pad + ((pos + 100) / 200) * (cssW - pad * 2);
   }
 
   function yFromLane(lane) {
@@ -310,134 +360,164 @@ function createMapRenderer(canvas) {
 
   function draw(state) {
     resizeToCss();
+    const now = performance.now();
 
-    // Background
-    ctx.fillStyle = "#07070a";
+    ctx.fillStyle = "#0a0c12";
     ctx.fillRect(0, 0, cssW, cssH);
+    if (arena.complete) {
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(arena, 0, 0, cssW, cssH);
+      ctx.globalAlpha = 1;
+    }
 
-    // Subtle vignette
-    const g = ctx.createRadialGradient(cssW * 0.5, cssH * 0.35, 40, cssW * 0.5, cssH * 0.35, cssW);
-    g.addColorStop(0, "rgba(240,201,106,0.10)");
-    g.addColorStop(1, "rgba(0,0,0,0.75)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, cssW, cssH);
-
-    // Lanes
     for (const lane of ["top", "mid", "bot"]) {
       const y = yFromLane(lane);
-      ctx.strokeStyle = "rgba(242,237,226,0.16)";
+      ctx.strokeStyle = "rgba(242,237,226,0.18)";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(xFromPos(-100), y);
       ctx.lineTo(xFromPos(100), y);
       ctx.stroke();
 
-      // Lane name
-      ctx.fillStyle = "rgba(242,237,226,0.55)";
-      ctx.font = "12px Palatino Linotype, Georgia, serif";
-      ctx.fillText(lane.toUpperCase(), 10, y + 4);
-
-      // Frontline pin
       const fx = xFromPos(state.lanes[lane].frontline);
-      ctx.strokeStyle = "rgba(240,201,106,0.75)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(240,201,106,0.85)";
       ctx.beginPath();
       ctx.moveTo(fx, y - 16);
       ctx.lineTo(fx, y + 16);
       ctx.stroke();
     }
 
-    // Towers
     for (const t of state.towers) {
       if (!t.alive) continue;
       const y = yFromLane(t.lane);
-      const pos = towerPos(t.faction, t.position);
-      const x = xFromPos(pos);
+      const x = xFromPos(towerPos(t.faction, t.position));
       ctx.fillStyle = t.faction === "alliance" ? "rgba(87,189,255,0.85)" : "rgba(255,92,122,0.85)";
-      ctx.strokeStyle = "rgba(0,0,0,0.55)";
-      ctx.lineWidth = 2;
-      roundRect(ctx, x - 8, y - 8, 16, 16, 4);
+      roundRect(ctx, x - 8, y - 8, 16, 16, 3);
       ctx.fill();
-      ctx.stroke();
     }
 
-    // Creeps
     for (const lane of ["top", "mid", "bot"]) {
       const y = yFromLane(lane);
       const units = state.lanes[lane].units;
-
-      drawUnits(units.alliance, y, "rgba(87,189,255,0.65)");
-      drawUnits(units.horde, y, "rgba(255,92,122,0.65)");
+      drawUnits(units.alliance, y, "alliance", now);
+      drawUnits(units.horde, y, "horde", now);
     }
 
-    // Heroes
-    for (const h of state.heroes.alliance) drawHero(h, "alliance");
-    for (const h of state.heroes.horde) drawHero(h, "horde");
+    for (const h of state.heroes.alliance) drawHero(h, "alliance", state, now);
+    for (const h of state.heroes.horde) drawHero(h, "horde", state, now);
 
-    // Bases
-    drawBase("alliance");
-    drawBase("horde");
+    drawEffects();
   }
 
-  function drawUnits(list, y, color) {
-    ctx.fillStyle = color;
-    for (let i = 0; i < list.length; i++) {
-      const u = list[i];
+  function drawUnits(units, y, faction, now) {
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
       const x = xFromPos(u.pos);
-      ctx.beginPath();
-      ctx.arc(x, y, 2.2, 0, Math.PI * 2);
-      ctx.fill();
+      const wobble = Math.sin(now / 120 + i * 0.7) * 1.5;
+      const yOffset = ((i % 5) - 2) * 4 + wobble;
+      const sprite = loadSprite(unitSpritePath(u.type, faction));
+      const size = u.type === "BALLISTA" ? 18 : 14;
+      if (sprite.complete) {
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.45)" : "rgba(255,92,122,0.45)";
+        ctx.drawImage(sprite, x - size / 2, y + yOffset - size / 2, size, size);
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = faction === "alliance" ? "#57bdff" : "#ff5c7a";
+        ctx.fillRect(x - 2, y + yOffset - 2, 4, 4);
+      }
     }
   }
 
-  function drawHero(h, faction) {
-    const y = yFromLane(h.lane);
-    const x = xFromPos(approxHeroPos(faction, h.lane));
-    const alive = h.alive;
+  function drawHero(hero, faction, state, now) {
+    const laneFrontline = state.lanes[hero.lane]?.frontline ?? 0;
+    const x = xFromPos(clamp(laneFrontline + (faction === "alliance" ? -10 : 10), -95, 95));
+    const y = yFromLane(hero.lane) + Math.sin(now / 200 + x * 0.02) * 1.8;
+    const sprite = loadSprite(classSpritePath(hero.class, faction));
 
-    ctx.save();
-    ctx.globalAlpha = alive ? 1 : 0.45;
-    ctx.fillStyle = faction === "alliance" ? "rgba(87,189,255,0.95)" : "rgba(255,92,122,0.95)";
-    ctx.strokeStyle = "rgba(0,0,0,0.70)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Initial letter
-    ctx.fillStyle = "rgba(0,0,0,0.75)";
-    ctx.font = "bold 10px Palatino Linotype, Georgia, serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(h.class.slice(0, 1).toUpperCase(), x, y + 0.5);
-    ctx.restore();
+    ctx.globalAlpha = hero.alive ? 1 : 0.4;
+    const size = 34;
+    if (sprite.complete) {
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.55)" : "rgba(255,92,122,0.55)";
+      ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
   }
 
-  function drawBase(faction) {
-    const x = xFromPos(faction === "alliance" ? -100 : 100);
-    const y = Math.round(cssH * 0.50);
-    ctx.fillStyle = faction === "alliance" ? "rgba(87,189,255,0.25)" : "rgba(255,92,122,0.25)";
-    ctx.strokeStyle = "rgba(240,201,106,0.35)";
-    ctx.lineWidth = 2;
-    roundRect(ctx, x - 16, y - 16, 32, 32, 6);
-    ctx.fill();
-    ctx.stroke();
+  function drawEffects() {
+    const now = performance.now();
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const fx = effects[i];
+      const age = now - fx.created;
+      if (age >= fx.ttl) {
+        effects.splice(i, 1);
+        continue;
+      }
+
+      const p = 1 - age / fx.ttl;
+      const x = xFromPos(fx.pos);
+      const y = yFromLane(fx.lane);
+      ctx.globalAlpha = p;
+      ctx.strokeStyle = fx.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, fx.size * (1 + (1 - p) * 0.8), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function loadSprite(src) {
+    if (sprites.has(src)) return sprites.get(src);
+    const img = new Image();
+    img.src = src;
+    sprites.set(src, img);
+    return img;
   }
 
   function towerPos(faction, positionText) {
-    // positionText is "Outer"/"Inner" from status
     const isOuter = positionText === "Outer";
     if (faction === "alliance") return isOuter ? -40 : -70;
     return isOuter ? 40 : 70;
   }
 
-  function approxHeroPos(faction, lane) {
-    // We don't have per-hero positions yet. Approximate by anchoring
-    // to the lane frontline and nudging toward their side.
-    const frontline = latestState?.lanes?.[lane]?.frontline ?? 0;
-    const bias = faction === "alliance" ? -10 : 10;
-    return clamp(frontline + bias, -95, 95);
+  function eventKey(e) {
+    return `${e.tick}:${e.type}:${e.killer || ""}:${e.victim || ""}:${e.attacker || ""}:${e.target || ""}`;
+  }
+
+  function pushEvents(state) {
+    const events = state.recentEvents || [];
+    const heroMap = new Map();
+    for (const h of state.heroes.alliance) heroMap.set(h.name, h);
+    for (const h of state.heroes.horde) heroMap.set(h.name, h);
+
+    for (const e of events) {
+      const key = eventKey(e);
+      if (seenEventKeys.has(key)) continue;
+      seenEventKeys.add(key);
+      if (seenEventKeys.size > 200) {
+        const first = seenEventKeys.values().next().value;
+        seenEventKeys.delete(first);
+      }
+
+      if (!["hero_attack", "ability_used", "hero_kill", "tower_attack"].includes(e.type)) continue;
+
+      const actor = heroMap.get(e.attacker) || heroMap.get(e.hero) || heroMap.get(e.killer) || heroMap.get(e.victim);
+      const lane = actor?.lane || "mid";
+      const pos = clamp((state.lanes[lane]?.frontline ?? 0) + Math.random() * 10 - 5, -95, 95);
+      const color = e.type === "ability_used" ? "#f0c96a" : e.type === "hero_kill" ? "#ff5c7a" : "#9ad7ff";
+
+      effects.push({
+        created: performance.now(),
+        ttl: e.type === "hero_kill" ? 900 : 420,
+        lane,
+        pos,
+        color,
+        size: e.type === "hero_kill" ? 14 : 8,
+      });
+    }
   }
 
   function roundRect(c, x, y, w, h, r) {
@@ -450,7 +530,13 @@ function createMapRenderer(canvas) {
     c.closePath();
   }
 
+  window.addEventListener("resize", resizeToCss);
+
   return {
     render: draw,
+    pushEvents,
   };
 }
+
+attachPredictionHandlers();
+connect();

@@ -93,8 +93,8 @@ export function getFullGameStatus(gameState) {
     // Add a compact unit snapshot for rendering (cap payload size).
     const lane = gameState.lanes[laneName];
     laneStatuses[laneName].units = {
-      alliance: lane.units.alliance.slice(-30).map((u) => ({ pos: u.pos, hp: u.hp })),
-      horde: lane.units.horde.slice(-30).map((u) => ({ pos: u.pos, hp: u.hp })),
+      alliance: lane.units.alliance.slice(-30).map((u) => ({ pos: u.pos, hp: u.hp, type: u.type })),
+      horde: lane.units.horde.slice(-30).map((u) => ({ pos: u.pos, hp: u.hp, type: u.type })),
     };
   }
   
