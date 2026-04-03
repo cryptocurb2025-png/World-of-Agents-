@@ -15,6 +15,11 @@ const PORT = Number(process.env.PORT || 3000);
 const TICK_RATE = Number(process.env.TICK_RATE || 10);
 const BROADCAST_RATE = Number(process.env.BROADCAST_RATE || 10);
 
+const DATA_DIR = path.join(__dirname, "data");
+const REWARD_LEDGER_FILE = path.join(DATA_DIR, "reward-ledger.json");
+const WOA_PER_GOLD = 1 / 20;
+const WOA_PER_ROUND_CAP = 120;
+
 const FIGHT_CLUB_ROUNDS = [
   {
     id: "ogres-vs-mages",
@@ -106,6 +111,63 @@ const fightClub = {
   predictions: Object.fromEntries(FIGHT_CLUB_ROUNDS.map((r) => [r.id, { alliance: 0, horde: 0 }])),
 };
 
+const rewardLedger = loadRewardLedger();
+
+function loadRewardLedger() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(REWARD_LEDGER_FILE)) {
+    const initial = {
+      factions: { alliance: 0, horde: 0 },
+      rounds: [],
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(REWARD_LEDGER_FILE, JSON.stringify(initial, null, 2), "utf8");
+    return initial;
+  }
+
+  try {
+    const raw = fs.readFileSync(REWARD_LEDGER_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      factions: parsed.factions || { alliance: 0, horde: 0 },
+      rounds: Array.isArray(parsed.rounds) ? parsed.rounds : [],
+      updatedAt: parsed.updatedAt || new Date().toISOString(),
+    };
+  } catch {
+    return {
+      factions: { alliance: 0, horde: 0 },
+      rounds: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+}
+
+function persistRewardLedger() {
+  rewardLedger.updatedAt = new Date().toISOString();
+  fs.writeFileSync(REWARD_LEDGER_FILE, JSON.stringify(rewardLedger, null, 2), "utf8");
+}
+
+function estimateRoundWoa(state, winner) {
+  const allianceGold = state.heroes.alliance.reduce((acc, h) => acc + h.gold, 0);
+  const hordeGold = state.heroes.horde.reduce((acc, h) => acc + h.gold, 0);
+
+  const aw = winner === "alliance" ? 1.1 : winner === "draw" ? 1.0 : 0.9;
+  const hw = winner === "horde" ? 1.1 : winner === "draw" ? 1.0 : 0.9;
+
+  const allianceWoa = Math.min(WOA_PER_ROUND_CAP, Math.floor(allianceGold * aw * WOA_PER_GOLD));
+  const hordeWoa = Math.min(WOA_PER_ROUND_CAP, Math.floor(hordeGold * hw * WOA_PER_GOLD));
+
+  return {
+    allianceGold,
+    hordeGold,
+    allianceWoa,
+    hordeWoa,
+  };
+}
+
 let gameState = initRoundState(fightClub.roundIndex);
 
 function initRoundState(index) {
@@ -135,6 +197,7 @@ function createScaledHero(def) {
 function finalizeRoundAndAdvance() {
   const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
   const winner = resolveRoundWinner(gameState);
+  const rewards = estimateRoundWoa(gameState, winner);
 
   if (winner === "alliance" || winner === "horde") {
     fightClub.wins[winner]++;
@@ -146,11 +209,26 @@ function finalizeRoundAndAdvance() {
     winner,
     tick: gameState.tick,
     endedAt: new Date().toISOString(),
+    rewards,
   });
 
   if (fightClub.history.length > 12) {
     fightClub.history = fightClub.history.slice(-12);
   }
+
+  rewardLedger.factions.alliance += rewards.allianceWoa;
+  rewardLedger.factions.horde += rewards.hordeWoa;
+  rewardLedger.rounds.push({
+    roundId: round.id,
+    winner,
+    tick: gameState.tick,
+    rewards,
+    endedAt: new Date().toISOString(),
+  });
+  if (rewardLedger.rounds.length > 400) {
+    rewardLedger.rounds = rewardLedger.rounds.slice(-400);
+  }
+  persistRewardLedger();
 
   fightClub.roundIndex = (fightClub.roundIndex + 1) % FIGHT_CLUB_ROUNDS.length;
   gameState = initRoundState(fightClub.roundIndex);
@@ -214,6 +292,13 @@ function getFightClubSummary() {
       total: totalPredictions,
       alliancePct: totalPredictions ? Math.round((prediction.alliance / totalPredictions) * 100) : 50,
       hordePct: totalPredictions ? Math.round((prediction.horde / totalPredictions) * 100) : 50,
+    },
+    rewards: {
+      totalAlliance: rewardLedger.factions.alliance,
+      totalHorde: rewardLedger.factions.horde,
+      roundsTracked: rewardLedger.rounds.length,
+      woaPerGold: WOA_PER_GOLD,
+      perRoundCap: WOA_PER_ROUND_CAP,
     },
   };
 }
@@ -296,6 +381,17 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, getFightClubSummary());
   }
 
+  if (req.method === "GET" && pathname === "/api/rewards") {
+    const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") || 20)));
+    return sendJson(res, 200, {
+      totals: rewardLedger.factions,
+      woaPerGold: WOA_PER_GOLD,
+      perRoundCap: WOA_PER_ROUND_CAP,
+      recentRounds: rewardLedger.rounds.slice(-limit).reverse(),
+      updatedAt: rewardLedger.updatedAt,
+    });
+  }
+
   if (req.method === "POST" && pathname === "/api/predict") {
     try {
       const body = await readJsonBody(req);
@@ -376,5 +472,6 @@ server.listen(PORT, () => {
   console.log(`  http://localhost:${PORT}`);
   console.log(`  http://localhost:${PORT}/api/state`);
   console.log(`  http://localhost:${PORT}/api/fightclub`);
+  console.log(`  http://localhost:${PORT}/api/rewards`);
   console.log(`  ws://localhost:${PORT}/ws`);
 });

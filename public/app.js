@@ -7,6 +7,7 @@ const el = {
   predictionStats: document.getElementById("prediction-stats"),
   predictAlliance: document.getElementById("predict-alliance"),
   predictHorde: document.getElementById("predict-horde"),
+  cinematicToggle: document.getElementById("cinematic-toggle"),
 
   baseAllianceHp: document.getElementById("base-alliance-hp"),
   baseHordeHp: document.getElementById("base-horde-hp"),
@@ -321,19 +322,40 @@ async function submitPrediction(pick) {
   }
 }
 
+function setCinematicMode(enabled) {
+  document.body.classList.toggle("cinematic-mode", enabled);
+  if (el.cinematicToggle) {
+    el.cinematicToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    el.cinematicToggle.textContent = enabled ? "Exit Cinematic" : "Cinematic View";
+  }
+  localStorage.setItem("woa-cinematic-mode", enabled ? "1" : "0");
+}
+
+function attachCinematicHandler() {
+  const saved = localStorage.getItem("woa-cinematic-mode") === "1";
+  setCinematicMode(saved);
+  el.cinematicToggle?.addEventListener("click", () => {
+    const next = !document.body.classList.contains("cinematic-mode");
+    setCinematicMode(next);
+    map.refreshLayout();
+  });
+}
+
 function createMapRenderer(canvas) {
   const ctx = canvas.getContext("2d", { alpha: false });
   let cssW = 0;
   let cssH = 0;
   const sprites = new Map();
   const effects = [];
+  const projectiles = [];
   const arena = loadSprite("/assets/terrain/fightclub-arena.svg");
 
   function resizeToCss() {
     const parent = canvas.parentElement;
     if (!parent) return;
     const w = Math.max(320, Math.floor(parent.clientWidth));
-    const viewTarget = Math.floor(window.innerHeight * 0.68);
+    const cinematic = document.body.classList.contains("cinematic-mode");
+    const viewTarget = Math.floor(window.innerHeight * (cinematic ? 0.84 : 0.68));
     const h = Math.max(260, Math.min(820, viewTarget));
     if (w === cssW && h === cssH) return;
     cssW = w;
@@ -385,6 +407,10 @@ function createMapRenderer(canvas) {
       ctx.moveTo(fx, y - 16);
       ctx.lineTo(fx, y + 16);
       ctx.stroke();
+
+      ctx.fillStyle = "rgba(242,237,226,0.52)";
+      ctx.font = "11px Georgia, serif";
+      ctx.fillText(lane.toUpperCase(), 10, y - 8);
     }
 
     for (const t of state.towers) {
@@ -406,6 +432,7 @@ function createMapRenderer(canvas) {
     for (const h of state.heroes.alliance) drawHero(h, "alliance", state, now);
     for (const h of state.heroes.horde) drawHero(h, "horde", state, now);
 
+    drawProjectiles(now);
     drawEffects();
   }
 
@@ -416,7 +443,7 @@ function createMapRenderer(canvas) {
       const wobble = Math.sin(now / 120 + i * 0.7) * 1.5;
       const yOffset = ((i % 5) - 2) * 4 + wobble;
       const sprite = loadSprite(unitSpritePath(u.type, faction));
-      const size = u.type === "BALLISTA" ? 18 : 14;
+      const size = u.type === "BALLISTA" ? 24 : 18;
       if (sprite.complete) {
         ctx.shadowBlur = 8;
         ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.45)" : "rgba(255,92,122,0.45)";
@@ -430,13 +457,13 @@ function createMapRenderer(canvas) {
   }
 
   function drawHero(hero, faction, state, now) {
-    const laneFrontline = state.lanes[hero.lane]?.frontline ?? 0;
-    const x = xFromPos(clamp(laneFrontline + (faction === "alliance" ? -10 : 10), -95, 95));
+    const p = heroWorldPosition(hero, faction, state);
+    const x = xFromPos(p.pos);
     const y = yFromLane(hero.lane) + Math.sin(now / 200 + x * 0.02) * 1.8;
     const sprite = loadSprite(classSpritePath(hero.class, faction));
 
     ctx.globalAlpha = hero.alive ? 1 : 0.4;
-    const size = 34;
+    const size = 42;
     if (sprite.complete) {
       ctx.shadowBlur = 14;
       ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.55)" : "rgba(255,92,122,0.55)";
@@ -444,6 +471,46 @@ function createMapRenderer(canvas) {
       ctx.shadowBlur = 0;
     }
     ctx.globalAlpha = 1;
+  }
+
+  function heroWorldPosition(hero, faction, state) {
+    const laneFrontline = state.lanes[hero.lane]?.frontline ?? 0;
+    const bias = faction === "alliance" ? -10 : 10;
+    return { lane: hero.lane, pos: clamp(laneFrontline + bias, -95, 95) };
+  }
+
+  function drawProjectiles(now) {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      const age = now - p.created;
+      if (age >= p.ttl) {
+        projectiles.splice(i, 1);
+        continue;
+      }
+
+      const t = age / p.ttl;
+      const x1 = xFromPos(p.fromPos);
+      const y1 = yFromLane(p.lane);
+      const x2 = xFromPos(p.toPos);
+      const y2 = yFromLane(p.lane);
+      const x = x1 + (x2 - x1) * t;
+      const y = y1 + (y2 - y1) * t + Math.sin(t * Math.PI) * p.arc;
+
+      ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(x, y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
   }
 
   function drawEffects() {
@@ -490,8 +557,8 @@ function createMapRenderer(canvas) {
   function pushEvents(state) {
     const events = state.recentEvents || [];
     const heroMap = new Map();
-    for (const h of state.heroes.alliance) heroMap.set(h.name, h);
-    for (const h of state.heroes.horde) heroMap.set(h.name, h);
+    for (const h of state.heroes.alliance) heroMap.set(h.name, { ...h, faction: "alliance" });
+    for (const h of state.heroes.horde) heroMap.set(h.name, { ...h, faction: "horde" });
 
     for (const e of events) {
       const key = eventKey(e);
@@ -502,18 +569,40 @@ function createMapRenderer(canvas) {
         seenEventKeys.delete(first);
       }
 
-      if (!["hero_attack", "ability_used", "hero_kill", "tower_attack"].includes(e.type)) continue;
+      if (!["hero_attack", "ability_used", "damage", "hero_kill", "tower_attack"].includes(e.type)) continue;
 
       const actor = heroMap.get(e.attacker) || heroMap.get(e.hero) || heroMap.get(e.killer) || heroMap.get(e.victim);
-      const lane = actor?.lane || "mid";
-      const pos = clamp((state.lanes[lane]?.frontline ?? 0) + Math.random() * 10 - 5, -95, 95);
-      const color = e.type === "ability_used" ? "#f0c96a" : e.type === "hero_kill" ? "#ff5c7a" : "#9ad7ff";
+      const defender = heroMap.get(e.defender) || heroMap.get(e.target) || heroMap.get(e.victim);
+      const lane = actor?.lane || defender?.lane || "mid";
+      const laneFrontline = state.lanes[lane]?.frontline ?? 0;
+      const actorPos = actor ? heroWorldPosition(actor, actor.faction, state).pos : clamp(laneFrontline - 22, -95, 95);
+      const defenderPos = defender ? heroWorldPosition(defender, defender.faction, state).pos : clamp(laneFrontline + 22, -95, 95);
+      const impactPos = clamp((actorPos + defenderPos) / 2 + Math.random() * 8 - 4, -95, 95);
+      const color =
+        e.type === "ability_used" || e.type === "damage"
+          ? "#f0c96a"
+          : e.type === "hero_kill"
+            ? "#ff5c7a"
+            : "#9ad7ff";
+
+      if (["hero_attack", "damage", "tower_attack"].includes(e.type)) {
+        projectiles.push({
+          created: performance.now(),
+          ttl: e.type === "damage" ? 460 : 320,
+          lane,
+          fromPos: actorPos,
+          toPos: defenderPos,
+          color,
+          radius: e.type === "damage" ? 3.4 : 2.4,
+          arc: e.type === "damage" ? -6 : 3,
+        });
+      }
 
       effects.push({
         created: performance.now(),
         ttl: e.type === "hero_kill" ? 900 : 420,
         lane,
-        pos,
+        pos: impactPos,
         color,
         size: e.type === "hero_kill" ? 14 : 8,
       });
@@ -535,8 +624,14 @@ function createMapRenderer(canvas) {
   return {
     render: draw,
     pushEvents,
+    refreshLayout: () => {
+      cssW = 0;
+      cssH = 0;
+      resizeToCss();
+    },
   };
 }
 
 attachPredictionHandlers();
+attachCinematicHandler();
 connect();

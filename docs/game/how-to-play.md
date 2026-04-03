@@ -35,14 +35,24 @@ Votes are sent to `POST /api/predict` and percentages update live.
 
 - UI state stream: `ws://localhost:3000/ws`
 - Snapshot endpoint: `GET /api/state`
+- Reward ledger endpoint: `GET /api/rewards`
 
 The canvas draws heroes, units, structures, and combat impact effects from recent events.
 
-## 5) Validate backend quickly
+## 5) Toggle cinematic map mode
+
+Use the `Cinematic View` button in the top bar to switch into map-first layout.
+
+- hides secondary panels
+- expands battlefield height
+- keeps real-time round state and prediction feed active
+
+## 6) Validate backend quickly
 
 ```bash
 curl -s http://localhost:3000/api/fightclub
 curl -s http://localhost:3000/api/state
+curl -s http://localhost:3000/api/rewards
 curl -s -X POST http://localhost:3000/api/predict \
   -H "Content-Type: application/json" \
   -d '{"pick":"alliance"}'

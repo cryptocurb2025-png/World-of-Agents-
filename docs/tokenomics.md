@@ -88,5 +88,5 @@ Token voting can adjust:
 
 ## 9) What is live vs planned
 
-- **Live now:** in-match gold logic and round scoring context.
-- **Planned next:** persistent wallet-backed pending $WOA ledger + claim endpoint integration.
+- **Live now:** in-match gold logic, round scoring context, and persisted reward ledger via `GET /api/rewards`.
+- **Planned next:** wallet-bound pending balances, per-player attribution, and on-chain claim execution.

@@ -83,6 +83,22 @@ Error response (`400`):
 { "error": "pick must be 'alliance' or 'horde'" }
 ```
 
+## GET /api/rewards
+
+Returns persisted reward ledger data from `data/reward-ledger.json`.
+
+Query params:
+
+- `limit` (optional, default 20, max 100): number of recent rounds.
+
+Response fields:
+
+- `totals` -> cumulative emitted reward estimate by faction
+- `woaPerGold` -> conversion scalar used by backend
+- `perRoundCap` -> hard round cap
+- `recentRounds` -> newest-first round reward records
+- `updatedAt` -> ledger write timestamp
+
 ## WebSocket /ws
 
 Connect to:
@@ -110,4 +126,4 @@ Broadcast cadence is controlled by `BROADCAST_RATE` (default 10/s).
 
 - persistent player profiles
 - historical match query endpoints
-- pending/claimable $WOA reward endpoints
+- wallet-based pending/claimable $WOA endpoints
