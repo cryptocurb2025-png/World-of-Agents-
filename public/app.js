@@ -59,8 +59,80 @@ let rafScheduled = false;
 let lastPaint = 0;
 const PAINT_MIN_MS = 80;
 
+let lastRoundId = null;
+let prevEventCount = 0;
+
 const seenEventKeys = new Set();
 const map = createMapRenderer(el.canvas);
+
+class AudioManager {
+  constructor() {
+    this.enabled = false;
+    this.ctx = null;
+    this.buffers = new Map();
+    this.volume = 0.4;
+  }
+
+  async init() {
+    if (this.ctx) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.enabled = true;
+    } catch (e) {
+      console.warn("Audio init failed:", e);
+    }
+  }
+
+  async loadSound(name, url) {
+    if (!this.ctx) return;
+    try {
+      const res = await fetch(url);
+      const arr = await res.arrayBuffer();
+      const buf = await this.ctx.decodeAudioData(arr);
+      this.buffers.set(name, buf);
+    } catch (e) {
+      console.warn(`Audio load failed: ${name}`, e);
+    }
+  }
+
+  play(name, options = {}) {
+    if (!this.enabled || !this.ctx || !this.buffers.has(name)) return;
+    const buf = this.buffers.get(name);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const gain = this.ctx.createGain();
+    gain.gain.value = options.volume ?? this.volume;
+    src.connect(gain);
+    gain.connect(this.ctx.destination);
+    src.start(0);
+  }
+
+  onRoundStart(callback) {
+    this._onRoundStart = callback;
+  }
+
+  onAttack(callback) {
+    this._onAttack = callback;
+  }
+
+  onDeath(callback) {
+    this._onDeath = callback;
+  }
+
+  emitRoundStart(roundId) {
+    if (this._onRoundStart) this._onRoundStart(roundId);
+  }
+
+  emitAttack(targetId) {
+    if (this._onAttack) this._onAttack(targetId);
+  }
+
+  emitDeath(unitId) {
+    if (this._onDeath) this._onDeath(unitId);
+  }
+}
+
+const audio = new AudioManager();
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -151,6 +223,38 @@ function unitSpritePath(type, faction) {
   return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/grunt-pixel.svg";
 }
 
+const UNIT_MAX_HP_BY_TYPE = {
+  FOOTMAN: 50,
+  GRUNT: 50,
+  RIFLEMAN: 35,
+  AXETHROWER: 35,
+  OGRE: 88,
+  BATTLE_MAGE: 45,
+  PEASANT: 36,
+  DEATH_KNIGHT: 90,
+  BALLISTA: 55,
+};
+
+function heroAccent(heroClass, faction) {
+  const cls = String(heroClass || "").toUpperCase();
+  if (cls === "MAGE") return "#b889ff";
+  if (cls === "RANGER") return "#8fe28f";
+  if (cls === "HEALER") return "#78e3ad";
+  if (cls === "WARRIOR") return faction === "alliance" ? "#7bb0ff" : "#d38f6a";
+  return faction === "alliance" ? "#57bdff" : "#ff5c7a";
+}
+
+function eventVisualStyle(event) {
+  const ability = String(event.ability || "").toLowerCase();
+  if (ability.includes("fireball")) return { color: "#ffb35c", glow: "rgba(255,140,60,0.45)", radius: 4.2, arc: -10 };
+  if (ability.includes("holy")) return { color: "#87efb8", glow: "rgba(135,239,184,0.42)", radius: 3.8, arc: -6 };
+  if (ability.includes("shield")) return { color: "#f0c96a", glow: "rgba(240,201,106,0.40)", radius: 3.4, arc: 1 };
+  if (ability.includes("multi")) return { color: "#b9ecff", glow: "rgba(120,200,255,0.40)", radius: 2.8, arc: 5 };
+  if (event.type === "hero_kill") return { color: "#ff5c7a", glow: "rgba(255,92,122,0.50)", radius: 5.2, arc: 0 };
+  if (event.type === "tower_attack") return { color: "#ffd68e", glow: "rgba(255,214,142,0.38)", radius: 3.2, arc: 2 };
+  return { color: "#9ad7ff", glow: "rgba(154,215,255,0.36)", radius: 2.8, arc: 3 };
+}
+
 function setHeroSlot(nameEl, iconEl, name, heroClass, faction) {
   const hasName = Boolean(name);
   setText(nameEl, hasName ? name : "-");
@@ -195,6 +299,24 @@ function render(state) {
   renderHeroCards(el.heroCardsAlliance, aHeroes, "alliance");
   renderHeroCards(el.heroCardsHorde, hHeroes, "horde");
   renderEvents(state.recentEvents || []);
+
+  if (fightClub && fightClub.round && fightClub.round.id !== lastRoundId) {
+    lastRoundId = fightClub.round.id;
+    audio.emitRoundStart(lastRoundId);
+  }
+
+  const events = state.recentEvents || [];
+  if (events.length > prevEventCount) {
+    const newEvents = events.slice(prevEventCount);
+    for (const e of newEvents) {
+      if (e.type === "unit_death" || e.type === "hero_death") {
+        audio.emitDeath(e.targetId || e.unitId || e.name);
+      } else if (e.type === "attack" || e.type === "hero_attack") {
+        audio.emitAttack(e.targetId || e.unitId);
+      }
+    }
+  }
+  prevEventCount = events.length;
 
   map.pushEvents(state);
   map.render(state);
@@ -348,7 +470,16 @@ function createMapRenderer(canvas) {
   const sprites = new Map();
   const effects = [];
   const projectiles = [];
+  const hitFlashes = new Map();
+  const groundRings = [];
   const arena = loadSprite("/assets/terrain/fightclub-arena.svg");
+  const structureSprites = {
+    allianceTower: loadSprite("/assets/structures/alliance-tower.svg"),
+    hordeTower: loadSprite("/assets/structures/horde-tower.svg"),
+    allianceKeep: loadSprite("/assets/structures/alliance-keep.svg"),
+    hordeKeep: loadSprite("/assets/structures/horde-keep.svg"),
+    banner: loadSprite("/assets/structures/center-banner.svg"),
+  };
 
   function resizeToCss() {
     const parent = canvas.parentElement;
@@ -387,15 +518,24 @@ function createMapRenderer(canvas) {
     ctx.fillStyle = "#0a0c12";
     ctx.fillRect(0, 0, cssW, cssH);
     if (arena.complete) {
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.72;
       ctx.drawImage(arena, 0, 0, cssW, cssH);
       ctx.globalAlpha = 1;
     }
 
+    drawMapFrame();
+
     for (const lane of ["top", "mid", "bot"]) {
       const y = yFromLane(lane);
+      ctx.strokeStyle = "rgba(0,0,0,0.28)";
+      ctx.lineWidth = 14;
+      ctx.beginPath();
+      ctx.moveTo(xFromPos(-100), y);
+      ctx.lineTo(xFromPos(100), y);
+      ctx.stroke();
+
       ctx.strokeStyle = "rgba(242,237,226,0.18)";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.moveTo(xFromPos(-100), y);
       ctx.lineTo(xFromPos(100), y);
@@ -413,14 +553,8 @@ function createMapRenderer(canvas) {
       ctx.fillText(lane.toUpperCase(), 10, y - 8);
     }
 
-    for (const t of state.towers) {
-      if (!t.alive) continue;
-      const y = yFromLane(t.lane);
-      const x = xFromPos(towerPos(t.faction, t.position));
-      ctx.fillStyle = t.faction === "alliance" ? "rgba(87,189,255,0.85)" : "rgba(255,92,122,0.85)";
-      roundRect(ctx, x - 8, y - 8, 16, 16, 3);
-      ctx.fill();
-    }
+    drawCenterBanner();
+    drawStructures(state);
 
     for (const lane of ["top", "mid", "bot"]) {
       const y = yFromLane(lane);
@@ -434,6 +568,24 @@ function createMapRenderer(canvas) {
 
     drawProjectiles(now);
     drawEffects();
+    drawHitFlashes(now);
+    drawGroundRings(now);
+  }
+
+  function drawMapFrame() {
+    ctx.strokeStyle = "rgba(240,201,106,0.25)";
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, cssW - 8, cssH - 8, 8);
+    ctx.stroke();
+  }
+
+  function drawCenterBanner() {
+    if (!structureSprites.banner.complete) return;
+    const w = 96;
+    const h = 36;
+    ctx.globalAlpha = 0.88;
+    ctx.drawImage(structureSprites.banner, cssW / 2 - w / 2, 12, w, h);
+    ctx.globalAlpha = 1;
   }
 
   function drawUnits(units, y, faction, now) {
@@ -444,16 +596,70 @@ function createMapRenderer(canvas) {
       const yOffset = ((i % 5) - 2) * 4 + wobble;
       const sprite = loadSprite(unitSpritePath(u.type, faction));
       const size = u.type === "BALLISTA" ? 24 : 18;
+      const drawY = y + yOffset;
+      const maxHp = UNIT_MAX_HP_BY_TYPE[String(u.type || "").toUpperCase()] || u.hp;
+
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.beginPath();
+      ctx.ellipse(x, drawY + size * 0.38, size * 0.33, 3.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+
       if (sprite.complete) {
         ctx.shadowBlur = 8;
         ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.45)" : "rgba(255,92,122,0.45)";
-        ctx.drawImage(sprite, x - size / 2, y + yOffset - size / 2, size, size);
+        ctx.drawImage(sprite, x - size / 2, drawY - size / 2, size, size);
         ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = faction === "alliance" ? "#57bdff" : "#ff5c7a";
-        ctx.fillRect(x - 2, y + yOffset - 2, 4, 4);
+        ctx.fillRect(x - 2, drawY - 2, 4, 4);
+      }
+
+      if ((u.type === "BALLISTA" || u.type === "OGRE" || u.type === "DEATH_KNIGHT") && u.hp < maxHp) {
+        drawBar(x - 8, drawY - size / 2 - 6, 16, 3, u.hp / maxHp, faction === "alliance" ? "#7bb0ff" : "#ff7c95");
       }
     }
+  }
+
+  function drawStructures(state) {
+    for (const t of state.towers) {
+      if (!t.alive) continue;
+      const y = yFromLane(t.lane);
+      const x = xFromPos(towerPos(t.faction, t.position));
+      const sprite = t.faction === "alliance" ? structureSprites.allianceTower : structureSprites.hordeTower;
+      const size = 30;
+
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.beginPath();
+      ctx.ellipse(x, y + 12, 12, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (sprite.complete) {
+        ctx.drawImage(sprite, x - size / 2, y - size / 2 - 4, size, size);
+      }
+
+      drawBar(x - 12, y - 21, 24, 3, t.hp / t.maxHp, t.faction === "alliance" ? "#7bb0ff" : "#ff7c95");
+    }
+
+    drawBaseStructure("alliance", state.strongholds.alliance);
+    drawBaseStructure("horde", state.strongholds.horde);
+  }
+
+  function drawBaseStructure(faction, base) {
+    const x = xFromPos(faction === "alliance" ? -100 : 100);
+    const y = Math.round(cssH * 0.5);
+    const sprite = faction === "alliance" ? structureSprites.allianceKeep : structureSprites.hordeKeep;
+    const size = 52;
+
+    ctx.fillStyle = "rgba(0,0,0,0.34)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + 22, 20, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (sprite.complete) {
+      ctx.drawImage(sprite, x - size / 2, y - size / 2 + 4, size, size);
+    }
+
+    drawBar(x - 18, y - 26, 36, 4, base.hp / base.maxHp, faction === "alliance" ? "#7bb0ff" : "#ff7c95");
   }
 
   function drawHero(hero, faction, state, now) {
@@ -461,15 +667,31 @@ function createMapRenderer(canvas) {
     const x = xFromPos(p.pos);
     const y = yFromLane(hero.lane) + Math.sin(now / 200 + x * 0.02) * 1.8;
     const sprite = loadSprite(classSpritePath(hero.class, faction));
+    const accent = heroAccent(hero.class, faction);
 
     ctx.globalAlpha = hero.alive ? 1 : 0.4;
     const size = 42;
     if (sprite.complete) {
+      ctx.fillStyle = "rgba(0,0,0,0.34)";
+      ctx.beginPath();
+      ctx.ellipse(x, y + 15, 15, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = hero.alive ? 0.35 : 0.18;
+      ctx.beginPath();
+      ctx.arc(x, y + 4, 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = hero.alive ? 1 : 0.4;
+
       ctx.shadowBlur = 14;
-      ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.55)" : "rgba(255,92,122,0.55)";
+      ctx.shadowColor = accent;
       ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
       ctx.shadowBlur = 0;
     }
+    drawBar(x - 16, y - 25, 32, 4, hero.hp / hero.maxHp, "#67dd8f");
+    drawBar(x - 16, y - 19, 32, 3, hero.mana / hero.maxMana, accent);
     ctx.globalAlpha = 1;
   }
 
@@ -496,7 +718,15 @@ function createMapRenderer(canvas) {
       const x = x1 + (x2 - x1) * t;
       const y = y1 + (y2 - y1) * t + Math.sin(t * Math.PI) * p.arc;
 
-      ctx.globalAlpha = 0.45;
+      ctx.globalAlpha = 0.22;
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.55;
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -505,12 +735,22 @@ function createMapRenderer(canvas) {
       ctx.stroke();
 
       ctx.globalAlpha = 1;
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = p.glow || p.color;
       ctx.fillStyle = p.color;
       ctx.beginPath();
       ctx.arc(x, y, p.radius, 0, Math.PI * 2);
       ctx.fill();
+      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
+  }
+
+  function drawBar(x, y, w, h, pct, color) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(x + 1, y + 1, Math.max(0, (w - 2) * clamp(pct, 0, 1)), Math.max(0, h - 2));
   }
 
   function drawEffects() {
@@ -526,11 +766,74 @@ function createMapRenderer(canvas) {
       const p = 1 - age / fx.ttl;
       const x = xFromPos(fx.pos);
       const y = yFromLane(fx.lane);
+      ctx.globalAlpha = p * 0.22;
+      ctx.fillStyle = fx.glow || fx.color;
+      ctx.beginPath();
+      ctx.arc(x, y, fx.size * (1.35 + (1 - p)), 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.globalAlpha = p;
       ctx.strokeStyle = fx.color;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(x, y, fx.size * (1 + (1 - p) * 0.8), 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.lineWidth = 1.5;
+      for (let spoke = 0; spoke < 4; spoke++) {
+        const a = (Math.PI / 2) * spoke + age / 160;
+        const inner = fx.size * 0.4;
+        const outer = fx.size * (1.1 + (1 - p) * 0.7);
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * inner, y + Math.sin(a) * inner);
+        ctx.lineTo(x + Math.cos(a) * outer, y + Math.sin(a) * outer);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawHitFlashes(now) {
+    for (const [targetId, flash] of hitFlashes) {
+      const age = now - flash.created;
+      if (age >= flash.ttl) {
+        hitFlashes.delete(targetId);
+        continue;
+      }
+      const p = 1 - age / flash.ttl;
+      ctx.globalAlpha = p * 0.7;
+      ctx.fillStyle = "#ffffff";
+      for (const h of [...state.heroes.alliance, ...state.heroes.horde]) {
+        if (h.id === targetId || h.name === targetId) {
+          const hp = heroWorldPosition(h, h.faction, state);
+          const x = xFromPos(hp.pos);
+          const y = yFromLane(h.lane);
+          ctx.beginPath();
+          ctx.arc(x, y, 14, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGroundRings(now) {
+    for (let i = groundRings.length - 1; i >= 0; i--) {
+      const ring = groundRings[i];
+      const age = now - ring.created;
+      if (age >= ring.ttl) {
+        groundRings.splice(i, 1);
+        continue;
+      }
+      const p = 1 - age / ring.ttl;
+      const x = xFromPos(ring.pos);
+      const y = yFromLane(ring.lane);
+      ctx.globalAlpha = p * 0.35;
+      ctx.strokeStyle = ring.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y + 8, ring.size * (1 + p * 1.2), 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -578,12 +881,7 @@ function createMapRenderer(canvas) {
       const actorPos = actor ? heroWorldPosition(actor, actor.faction, state).pos : clamp(laneFrontline - 22, -95, 95);
       const defenderPos = defender ? heroWorldPosition(defender, defender.faction, state).pos : clamp(laneFrontline + 22, -95, 95);
       const impactPos = clamp((actorPos + defenderPos) / 2 + Math.random() * 8 - 4, -95, 95);
-      const color =
-        e.type === "ability_used" || e.type === "damage"
-          ? "#f0c96a"
-          : e.type === "hero_kill"
-            ? "#ff5c7a"
-            : "#9ad7ff";
+      const style = eventVisualStyle(e);
 
       if (["hero_attack", "damage", "tower_attack"].includes(e.type)) {
         projectiles.push({
@@ -592,9 +890,10 @@ function createMapRenderer(canvas) {
           lane,
           fromPos: actorPos,
           toPos: defenderPos,
-          color,
-          radius: e.type === "damage" ? 3.4 : 2.4,
-          arc: e.type === "damage" ? -6 : 3,
+          color: style.color,
+          glow: style.glow,
+          radius: style.radius,
+          arc: style.arc,
         });
       }
 
@@ -603,9 +902,25 @@ function createMapRenderer(canvas) {
         ttl: e.type === "hero_kill" ? 900 : 420,
         lane,
         pos: impactPos,
-        color,
+        color: style.color,
+        glow: style.glow,
         size: e.type === "hero_kill" ? 14 : 8,
       });
+
+      if (["damage", "hero_attack", "attack"].includes(e.type)) {
+        const targetId = e.targetId || e.target || e.defender;
+        if (targetId) {
+          hitFlashes.set(targetId, { created: performance.now(), ttl: 140 });
+        }
+        groundRings.push({
+          created: performance.now(),
+          ttl: 320,
+          lane,
+          pos: impactPos,
+          color: style.color,
+          size: 6,
+        });
+      }
     }
   }
 
