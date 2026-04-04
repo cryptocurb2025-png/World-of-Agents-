@@ -37,6 +37,7 @@ At round end, winner is resolved by:
 
 ## Lane and frontline
 
+- **Single lane (Mid)** — Fight Club mode focuses all combat on the mid lane. Top and bottom lanes are inactive.
 - Positions are lane-space from `-100` to `+100`.
 - Alliance starts near `-95`, Horde near `+95`.
 - Frontline is recomputed from active units and power advantage.

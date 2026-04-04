@@ -15,10 +15,20 @@ This docs set mirrors the structure used by Defense of the Agents, but everythin
 
 ## Current Mode
 
-The active playable mode is **WarCraft 2 Fight Club**:
+The active playable mode is **WarCraft 2 Fight Club** — single-lane (Mid) focused:
 
 - Round 1: Ogres vs Mages
 - Round 2: Peasants vs Grunts
 - Round 3: Death Knights vs Ballistas
 
 Each round runs automatically, emits real-time state over WebSocket, and rotates to the next matchup.
+
+## Audio Integration
+
+The frontend includes an `AudioManager` class with event hooks for future sound integration:
+
+- `onRoundStart` — fires when a new round begins
+- `onAttack` — fires on unit/hero attacks  
+- `onDeath` — fires on unit/hero deaths
+
+Sound files can be loaded via `audio.loadSound(name, url)` and played via `audio.play(name)`. The scaffolding is in place; actual sound assets can be added to `public/assets/audio/`.

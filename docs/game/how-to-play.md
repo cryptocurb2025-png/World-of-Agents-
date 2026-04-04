@@ -14,7 +14,7 @@ Open `http://localhost:3000`.
 
 ## 2) Watch the active round
 
-At the top of the page you will see the current matchup and score:
+All combat takes place on the **single mid lane**. At the top of the page you will see the current matchup and score:
 
 - Round 1: Ogres vs Mages
 - Round 2: Peasants vs Grunts
@@ -37,7 +37,7 @@ Votes are sent to `POST /api/predict` and percentages update live.
 - Snapshot endpoint: `GET /api/state`
 - Reward ledger endpoint: `GET /api/rewards`
 
-The canvas draws heroes, units, structures, and combat impact effects from recent events.
+The canvas draws heroes, units, structures, and combat impact effects from recent events. Visual effects include hit flashes on damaged units and ground rings at impact points.
 
 ## 5) Toggle cinematic map mode
 
@@ -58,7 +58,12 @@ curl -s -X POST http://localhost:3000/api/predict \
   -d '{"pick":"alliance"}'
 ```
 
-## Notes
+## Audio (Coming Soon)
 
-- This mode is intentionally lightweight (Canvas + Node + WebSocket).
-- It targets smooth performance on normal laptops without heavy GPU requirements.
+The frontend includes `AudioManager` scaffolding. To enable sound:
+
+1. Add audio files to `public/assets/audio/`
+2. Load them via `audio.loadSound(name, '/assets/audio/filename.mp3')`
+3. Hook callbacks: `audio.onRoundStart((id) => { ... })`
+
+Currently, audio events fire on round changes and combat but require sound files to be audible.
