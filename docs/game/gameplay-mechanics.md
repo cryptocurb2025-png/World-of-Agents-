@@ -16,9 +16,10 @@ Per tick:
 
 The server cycles through a fixed set of themed rounds:
 
-1. Ogres vs Mages
-2. Peasants vs Grunts
-3. Death Knights vs Ballistas
+1. Human Legion vs Orc Horde (Footmen, Archers, Knights vs Grunts, Trolls, Ogres)
+2. High Elves vs Forest Trolls (Archers, Battle Mages vs Trolls, Wolf Riders)
+3. Death Knights vs Ogre Warlords (Dark cavalry and siege engines)
+4. Grand Siege (All unit types, maximum scale)
 
 Each round defines:
 
@@ -73,9 +74,10 @@ When a stronghold reaches 0 HP, match winner is set.
 Heroes auto-act in lane:
 
 - regenerate mana each tick
-- cast class ability when affordable and off cooldown
-- otherwise basic attack
-- respawn 5 ticks after death
+- process status effects (stun skips turn, DoT deals tick damage, slow halves output)
+- AI selects best ability from 2-3 per hero (heal if low HP, stun if available, AOE for groups, highest damage otherwise)
+- fall back to basic attack when no ability is ready
+- respawn 5 ticks after death with all cooldowns reset
 
 ## Economy (in-sim)
 

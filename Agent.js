@@ -13,7 +13,7 @@ export const CLASSES = {
     baseMana: 60,
     baseDamage: 15,
     manaRegen: 8,
-    defaultAbility: ABILITIES.SHIELD_SLAM,
+    abilities: [ABILITIES.SHIELD_SLAM, ABILITIES.THUNDER_CLAP, ABILITIES.BATTLE_SHOUT],
   },
   MAGE: {
     name: "Mage",
@@ -21,7 +21,7 @@ export const CLASSES = {
     baseMana: 100,
     baseDamage: 8,
     manaRegen: 12,
-    defaultAbility: ABILITIES.FIREBALL,
+    abilities: [ABILITIES.FIREBALL, ABILITIES.BLIZZARD, ABILITIES.FROST_BOLT],
   },
   RANGER: {
     name: "Ranger",
@@ -29,7 +29,7 @@ export const CLASSES = {
     baseMana: 50,
     baseDamage: 18,
     manaRegen: 6,
-    defaultAbility: ABILITIES.MULTI_SHOT,
+    abilities: [ABILITIES.MULTI_SHOT, ABILITIES.POISON_ARROW],
   },
   HEALER: {
     name: "Healer",
@@ -37,7 +37,7 @@ export const CLASSES = {
     baseMana: 120,
     baseDamage: 6,
     manaRegen: 15,
-    defaultAbility: ABILITIES.HOLY_LIGHT,
+    abilities: [ABILITIES.HOLY_LIGHT, ABILITIES.CHAIN_HEAL, ABILITIES.WAR_STOMP],
   },
 };
 
@@ -46,6 +46,8 @@ export function createAgent(name, classType, faction = null, lane = "mid") {
   if (!template) {
     throw new Error(`Unknown class: ${classType}`);
   }
+
+  const abilities = template.abilities.map((fn) => fn());
 
   return {
     name,
@@ -58,7 +60,10 @@ export function createAgent(name, classType, faction = null, lane = "mid") {
     maxMana: template.baseMana,
     manaRegen: template.manaRegen,
     damage: template.baseDamage,
-    ability: template.defaultAbility(),
+    abilities,
+    // Backward compat: legacy code can still read agent.ability
+    get ability() { return this.abilities[0]; },
+    statusEffects: [],
     gold: 0,
     kills: 0,
     deaths: 0,
@@ -131,7 +136,8 @@ export function addXp(agent, amount) {
 export function respawnAgent(agent) {
   agent.hp = agent.maxHp;
   agent.mana = agent.maxMana;
-  agent.ability.currentCooldown = 0;
+  agent.statusEffects = [];
+  for (const ab of agent.abilities) ab.currentCooldown = 0;
 }
 
 export function getStatus(agent) {

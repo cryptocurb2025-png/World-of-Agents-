@@ -19,7 +19,7 @@ import {
   isAbilityReady,
   canAffordAbility,
   triggerCooldown,
-  reduceCooldown,
+  reduceAllCooldowns,
 } from "./Ability.js";
 import { updateFrontline, recomputeFrontlineFromUnits, getHeroInLane, LANE_NAMES } from "./Lane.js";
 import { createUnit, isUnitAlive, stepUnitCooldown, dealDamageToUnit, clampLanePos } from "./Unit.js";
@@ -69,7 +69,16 @@ function getLaneSpawnConfig(gameState, laneName) {
   };
 
   const cfg = gameState.spawnConfig?.[laneName];
-  if (!cfg) return defaultConfig;
+  if (!gameState.spawnConfig) return defaultConfig;
+  if (!cfg) {
+    return {
+      spawnEvery: Number.MAX_SAFE_INTEGER,
+      maxPerSide: 0,
+      allianceType: defaultConfig.allianceType,
+      hordeType: defaultConfig.hordeType,
+      burst: 0,
+    };
+  }
 
   return {
     spawnEvery: Number(cfg.spawnEvery || defaultConfig.spawnEvery),
@@ -113,12 +122,12 @@ export function heroBasicAttack(attacker, defender, gameState) {
   return { damage, isKill, goldEarned };
 }
 
-export function heroUseAbility(attacker, defender, gameState) {
-  const ability = attacker.ability;
+export function heroUseAbility(attacker, defender, gameState, ability = null) {
+  ability = ability || attacker.abilities[0];
   spendMana(attacker, ability.manaCost);
   triggerCooldown(ability);
 
-  // Healing ability — heals self (only 1 hero per faction per lane)
+  // Healing ability — heals self
   if (ability.type === "heal") {
     const healed = healAgent(attacker, ability.damage);
     logEvent(gameState, "ability_used", {
@@ -131,8 +140,82 @@ export function heroUseAbility(attacker, defender, gameState) {
     return { healed, isKill: false, goldEarned: 0, abilityName: ability.name };
   }
 
-  // Damage ability
-  const damage = takeDamage(defender, ability.damage);
+  // Armor buff — apply to self
+  if (ability.type === "armor_buff") {
+    applyStatusEffect(attacker, { type: "armor_buff", value: ability.effectValue, duration: ability.duration, source: attacker.name });
+    logEvent(gameState, "ability_used", {
+      attacker: attacker.name,
+      ability: ability.name,
+      type: "armor_buff",
+      duration: ability.duration,
+    });
+    return { damage: 0, isKill: false, goldEarned: 0, abilityName: ability.name };
+  }
+
+  // Stun — damage + apply stun to defender
+  if (ability.type === "stun" && defender) {
+    const damage = takeDamageWithArmor(defender, ability.damage);
+    applyStatusEffect(defender, { type: "stun", value: 0, duration: ability.duration, source: attacker.name });
+    const isKill = !isAlive(defender);
+    const goldEarned = awardGold(attacker, damage, isKill ? GOLD_ON_HERO_KILL : 0);
+    logEvent(gameState, "ability_used", {
+      attacker: attacker.name, defender: defender.name,
+      ability: ability.name, type: "stun", damage, defenderHp: defender.hp,
+    });
+    if (isKill) { addKill(attacker); addDeath(defender); deadHeroes.set(defender, gameState.tick + RESPAWN_TIME); logEvent(gameState, "hero_kill", { killer: attacker.name, victim: defender.name }); }
+    return { damage, isKill, goldEarned, abilityName: ability.name };
+  }
+
+  // Slow — damage + apply slow to defender
+  if (ability.type === "slow" && defender) {
+    const damage = takeDamageWithArmor(defender, ability.damage);
+    applyStatusEffect(defender, { type: "slow", value: ability.effectValue, duration: ability.duration, source: attacker.name });
+    const isKill = !isAlive(defender);
+    const goldEarned = awardGold(attacker, damage, isKill ? GOLD_ON_HERO_KILL : 0);
+    logEvent(gameState, "ability_used", {
+      attacker: attacker.name, defender: defender.name,
+      ability: ability.name, type: "slow", damage, defenderHp: defender.hp,
+    });
+    if (isKill) { addKill(attacker); addDeath(defender); deadHeroes.set(defender, gameState.tick + RESPAWN_TIME); logEvent(gameState, "hero_kill", { killer: attacker.name, victim: defender.name }); }
+    return { damage, isKill, goldEarned, abilityName: ability.name };
+  }
+
+  // DoT — initial damage + apply DoT to defender
+  if (ability.type === "dot" && defender) {
+    const damage = takeDamageWithArmor(defender, ability.damage);
+    applyStatusEffect(defender, { type: "dot", value: ability.effectValue, duration: ability.duration, source: attacker.name });
+    const isKill = !isAlive(defender);
+    const goldEarned = awardGold(attacker, damage, isKill ? GOLD_ON_HERO_KILL : 0);
+    logEvent(gameState, "ability_used", {
+      attacker: attacker.name, defender: defender.name,
+      ability: ability.name, type: "dot", damage, defenderHp: defender.hp,
+    });
+    if (isKill) { addKill(attacker); addDeath(defender); deadHeroes.set(defender, gameState.tick + RESPAWN_TIME); logEvent(gameState, "hero_kill", { killer: attacker.name, victim: defender.name }); }
+    return { damage, isKill, goldEarned, abilityName: ability.name };
+  }
+
+  // AOE damage — damage defender + nearby enemy units
+  if (ability.type === "aoe_damage") {
+    let totalDamage = 0;
+    let isKill = false;
+    if (defender) {
+      const damage = takeDamageWithArmor(defender, ability.damage);
+      totalDamage += damage;
+      isKill = !isAlive(defender);
+      if (isKill) { addKill(attacker); addDeath(defender); deadHeroes.set(defender, gameState.tick + RESPAWN_TIME); logEvent(gameState, "hero_kill", { killer: attacker.name, victim: defender.name }); }
+    }
+    // AOE hits nearby creeps (handled via lane in processLaneCombat caller)
+    const goldEarned = awardGold(attacker, totalDamage, isKill ? GOLD_ON_HERO_KILL : 0);
+    logEvent(gameState, "ability_used", {
+      attacker: attacker.name, defender: defender?.name || "area",
+      ability: ability.name, type: "aoe_damage", damage: totalDamage,
+    });
+    return { damage: totalDamage, isKill, goldEarned, abilityName: ability.name };
+  }
+
+  // Default: plain damage ability
+  if (!defender) return { damage: 0, isKill: false, goldEarned: 0, abilityName: ability.name };
+  const damage = takeDamageWithArmor(defender, ability.damage);
   const isKill = !isAlive(defender);
   const goldEarned = awardGold(attacker, damage, isKill ? GOLD_ON_HERO_KILL : 0);
 
@@ -160,7 +243,7 @@ export function heroUseAbility(attacker, defender, gameState) {
 }
 
 export function canUseAbility(agent) {
-  return isAbilityReady(agent.ability) && canAffordAbility(agent, agent.ability);
+  return agent.abilities.some((ab) => isAbilityReady(ab) && canAffordAbility(agent, ab));
 }
 
 export function heroAttackTower(hero, tower, gameState) {
@@ -234,6 +317,114 @@ function getEnemyFaction(faction) {
   return faction === "alliance" ? "horde" : "alliance";
 }
 
+// --- Status effect processing ---
+
+function applyStatusEffect(target, effect) {
+  // Don't stack identical effects, refresh duration instead
+  const existing = target.statusEffects.find((e) => e.type === effect.type && e.source === effect.source);
+  if (existing) {
+    existing.remaining = effect.duration;
+    return;
+  }
+  target.statusEffects.push({
+    type: effect.type,
+    value: effect.value,
+    remaining: effect.duration,
+    source: effect.source,
+  });
+}
+
+function processStatusEffects(hero, gameState) {
+  if (!hero.statusEffects || !hero.statusEffects.length) return { stunned: false };
+
+  let stunned = false;
+
+  for (let i = hero.statusEffects.length - 1; i >= 0; i--) {
+    const fx = hero.statusEffects[i];
+
+    if (fx.type === "stun") {
+      stunned = true;
+    } else if (fx.type === "dot") {
+      const dmg = takeDamage(hero, fx.value);
+      logEvent(gameState, "dot_tick", { target: hero.name, damage: dmg, source: fx.source });
+      if (!isAlive(hero)) {
+        addDeath(hero);
+        deadHeroes.set(hero, gameState.tick + RESPAWN_TIME);
+        logEvent(gameState, "hero_kill", { killer: fx.source, victim: hero.name });
+      }
+    } else if (fx.type === "slow") {
+      // Slow halves hero damage output this tick (applied in combat)
+    } else if (fx.type === "armor_buff") {
+      // Armor buff reduces incoming damage (checked in takeDamage wrapper)
+    }
+
+    fx.remaining--;
+    if (fx.remaining <= 0) {
+      hero.statusEffects.splice(i, 1);
+    }
+  }
+
+  return { stunned };
+}
+
+function getEffectiveDamage(hero) {
+  const slow = hero.statusEffects?.find((e) => e.type === "slow");
+  return slow ? Math.floor(hero.damage * slow.value) : hero.damage;
+}
+
+function getArmorReduction(hero) {
+  const armor = hero.statusEffects?.find((e) => e.type === "armor_buff");
+  return armor ? armor.value : 0;
+}
+
+function takeDamageWithArmor(target, amount) {
+  const reduction = getArmorReduction(target);
+  const effective = Math.max(1, amount - reduction);
+  return takeDamage(target, effective);
+}
+
+// --- AI ability selection ---
+
+function selectBestAbility(hero, enemyHero, gameState) {
+  const ready = hero.abilities.filter((ab) => isAbilityReady(ab) && canAffordAbility(hero, ab));
+  if (!ready.length) return null;
+
+  const hpPct = hero.hp / hero.maxHp;
+
+  // Heal if low HP
+  if (hpPct < 0.4) {
+    const heal = ready.find((ab) => ab.type === "heal");
+    if (heal) return heal;
+  }
+
+  // Stun if enemy hero present and alive
+  if (enemyHero && isAlive(enemyHero)) {
+    const stun = ready.find((ab) => ab.type === "stun");
+    if (stun) return stun;
+  }
+
+  // Prefer AOE when lots of enemy units nearby
+  const aoe = ready.find((ab) => ab.type === "aoe_damage");
+  if (aoe) return aoe;
+
+  // Prefer DoT/slow for sustained pressure
+  const debuff = ready.find((ab) => ab.type === "dot" || ab.type === "slow");
+  if (debuff && enemyHero && isAlive(enemyHero)) return debuff;
+
+  // Armor buff if about to fight
+  if (hpPct < 0.7) {
+    const buff = ready.find((ab) => ab.type === "armor_buff");
+    if (buff) return buff;
+  }
+
+  // Highest damage ability
+  const dmg = ready.filter((ab) => ab.type === "damage").sort((a, b) => b.damage - a.damage);
+  if (dmg.length) return dmg[0];
+
+  // Fallback: first ready ability
+  return ready[0];
+}
+
 function processLaneCombat(gameState, laneName) {
   const lane = gameState.lanes[laneName];
   const towers = gameState.towers[laneName];
@@ -243,10 +434,16 @@ function processLaneCombat(gameState, laneName) {
   if (gameState.tick % spawnCfg.spawnEvery === 0) {
     for (let n = 0; n < spawnCfg.burst; n++) {
       if (lane.units.alliance.length < spawnCfg.maxPerSide) {
-        lane.units.alliance.push(createUnit(spawnCfg.allianceType, "alliance"));
+        const type = Array.isArray(spawnCfg.allianceType) 
+          ? spawnCfg.allianceType[Math.floor(Math.random() * spawnCfg.allianceType.length)]
+          : spawnCfg.allianceType;
+        lane.units.alliance.push(createUnit(type, "alliance"));
       }
       if (lane.units.horde.length < spawnCfg.maxPerSide) {
-        lane.units.horde.push(createUnit(spawnCfg.hordeType, "horde"));
+        const type = Array.isArray(spawnCfg.hordeType)
+          ? spawnCfg.hordeType[Math.floor(Math.random() * spawnCfg.hordeType.length)]
+          : spawnCfg.hordeType;
+        lane.units.horde.push(createUnit(type, "horde"));
       }
     }
   }
@@ -264,22 +461,39 @@ function processLaneCombat(gameState, laneName) {
     const enemyFaction = getEnemyFaction(faction);
     const enemyHero = getHeroInLane(lane, enemyFaction);
 
+    // Process status effects (stun, DoT, slow, armor)
+    const { stunned } = processStatusEffects(hero, gameState);
+    if (!isAlive(hero)) continue;
+
     // Mana regen
     regenMana(hero);
 
-    // Determine target priority:
-    // 1. Enemy hero in same lane (if alive)
-    // 2. Enemy tower (if frontline is pushed enough)
-    // 3. Enemy stronghold (if all towers destroyed)
+    // Stunned heroes skip their action
+    if (stunned) {
+      reduceAllCooldowns(hero.abilities);
+      continue;
+    }
+
+    // AI picks best ability for the situation
+    const bestAbility = selectBestAbility(hero, enemyHero, gameState);
 
     if (enemyHero && isAlive(enemyHero)) {
-      // Fight enemy hero — but healers prefer to heal themselves if damaged
-      if (canUseAbility(hero) && (hero.ability.type === "heal" ? hero.hp < hero.maxHp : true)) {
-        heroUseAbility(hero, enemyHero, gameState);
-      } else if (hero.ability.type !== "heal") {
-        heroBasicAttack(hero, enemyHero, gameState);
+      if (bestAbility) {
+        heroUseAbility(hero, enemyHero, gameState, bestAbility);
+        // AOE: also damage nearby enemy creeps
+        if (bestAbility.type === "aoe_damage" && bestAbility.radius > 0) {
+          const enemyUnits = lane.units[enemyFaction];
+          const killed = [];
+          for (const u of enemyUnits) {
+            if (!isUnitAlive(u)) continue;
+            dealDamageToUnit(u, Math.floor(bestAbility.damage * 0.5));
+            if (!isUnitAlive(u)) killed.push(u);
+          }
+          if (killed.length) {
+            earnGold(hero, killed.length * 3);
+          }
+        }
       } else {
-        // Healer with no ability ready — basic attacks
         heroBasicAttack(hero, enemyHero, gameState);
       }
     } else {
@@ -289,13 +503,12 @@ function processLaneCombat(gameState, laneName) {
       if (enemyTower && isTowerAlive(enemyTower)) {
         heroAttackTower(hero, enemyTower, gameState);
       } else if (canAttackStronghold(gameState.towers, faction, laneName)) {
-        // All towers destroyed, attack stronghold
         heroAttackStronghold(hero, gameState.strongholds[enemyFaction], gameState);
       }
     }
 
-    // Reduce ability cooldowns
-    reduceCooldown(hero.ability);
+    // Reduce all ability cooldowns
+    reduceAllCooldowns(hero.abilities);
   }
 
   // Towers attack enemy heroes (only if enemy is pushing into tower range)
@@ -501,36 +714,36 @@ export function runMatch(agent1, agent2) {
     regenMana(agent2);
 
     // Agent 1 turn
-    if (canUseAbility(agent1)) {
-      const ability = agent1.ability;
-      spendMana(agent1, ability.manaCost);
-      triggerCooldown(ability);
-      const damage = takeDamage(agent2, ability.damage);
+    const ab1 = agent1.abilities.find((ab) => isAbilityReady(ab) && canAffordAbility(agent1, ab));
+    if (ab1) {
+      spendMana(agent1, ab1.manaCost);
+      triggerCooldown(ab1);
+      const damage = takeDamage(agent2, ab1.damage);
       const gold = awardGold(agent1, damage, !isAlive(agent2) ? GOLD_ON_HERO_KILL : 0);
-      console.log(`  ${agent1.name} casts "${ability.name}" for ${damage} damage! ${agent2.name} HP: ${agent2.hp} (+${gold}g)`);
+      console.log(`  ${agent1.name} casts "${ab1.name}" for ${damage} damage! ${agent2.name} HP: ${agent2.hp} (+${gold}g)`);
     } else {
       const damage = takeDamage(agent2, agent1.damage);
       const gold = awardGold(agent1, damage, !isAlive(agent2) ? GOLD_ON_HERO_KILL : 0);
       console.log(`  ${agent1.name} attacks for ${damage} damage. ${agent2.name} HP: ${agent2.hp} (+${gold}g)`);
     }
-    reduceCooldown(agent1.ability);
+    reduceAllCooldowns(agent1.abilities);
 
     if (!isAlive(agent2)) break;
 
     // Agent 2 turn
-    if (canUseAbility(agent2)) {
-      const ability = agent2.ability;
-      spendMana(agent2, ability.manaCost);
-      triggerCooldown(ability);
-      const damage = takeDamage(agent1, ability.damage);
+    const ab2 = agent2.abilities.find((ab) => isAbilityReady(ab) && canAffordAbility(agent2, ab));
+    if (ab2) {
+      spendMana(agent2, ab2.manaCost);
+      triggerCooldown(ab2);
+      const damage = takeDamage(agent1, ab2.damage);
       const gold = awardGold(agent2, damage, !isAlive(agent1) ? GOLD_ON_HERO_KILL : 0);
-      console.log(`  ${agent2.name} casts "${ability.name}" for ${damage} damage! ${agent1.name} HP: ${agent1.hp} (+${gold}g)`);
+      console.log(`  ${agent2.name} casts "${ab2.name}" for ${damage} damage! ${agent1.name} HP: ${agent1.hp} (+${gold}g)`);
     } else {
       const damage = takeDamage(agent1, agent2.damage);
       const gold = awardGold(agent2, damage, !isAlive(agent1) ? GOLD_ON_HERO_KILL : 0);
       console.log(`  ${agent2.name} attacks for ${damage} damage. ${agent1.name} HP: ${agent1.hp} (+${gold}g)`);
     }
-    reduceCooldown(agent2.ability);
+    reduceAllCooldowns(agent2.abilities);
 
     console.log("");
     round++;

@@ -88,5 +88,14 @@ Token voting can adjust:
 
 ## 9) What is live vs planned
 
-- **Live now:** in-match gold logic, round scoring context, and persisted reward ledger via `GET /api/rewards`.
-- **Planned next:** wallet-bound pending balances, per-player attribution, and on-chain claim execution.
+- **Live now:**
+  - In-match gold logic and round scoring
+  - Persisted reward ledger via `GET /api/rewards`
+  - Per-player session tracking and pending balance attribution
+  - Per-round cap (120 WOA)
+  - Daily soft cap (900 WOA, degrading) and hard cap (1500 WOA)
+  - 35% participation gate (must be connected for 35% of round ticks)
+  - Claim API: `POST /api/claim` with 100 WOA minimum and 10-minute cooldown
+  - Balance API: `GET /api/balance?sessionId=xxx`
+  - Winner/loser/draw multipliers (1.10x / 0.90x / 1.00x)
+- **Planned next:** wallet-bound balances, on-chain claim execution, cosmetic sinks, governance voting.

@@ -703,6 +703,115 @@ a:hover { text-decoration: underline; }
   line-height: 1.35;
 }
 
+.rewardHud {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+  background: rgba(226, 200, 150, 0.05);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.rewardHud__col {
+  text-align: center;
+}
+
+.rewardHud__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.rewardHud__value {
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--brass);
+}
+
+/* My Rewards section */
+.myRewards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  background: rgba(226, 200, 150, 0.05);
+  border: 1px solid rgba(240,201,106,0.22);
+  border-radius: var(--radius);
+  padding: 14px;
+  align-items: center;
+}
+
+.myRewards__col {
+  text-align: center;
+}
+
+.claimBtn {
+  appearance: none;
+  border: 1px solid rgba(240,201,106,0.45);
+  border-radius: 999px;
+  padding: 9px 20px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: var(--bg);
+  background: linear-gradient(180deg, rgba(240,201,106,0.95), rgba(200,160,60,0.9));
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.claimBtn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+}
+
+.claimBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.claimStatus {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Match History table */
+.matchHistory {
+  margin-top: 0;
+}
+
+.historyTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.historyTable th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.historyTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(242,237,226,0.06);
+  color: var(--text);
+}
+
+.historyTable tr:hover td {
+  background: rgba(240,201,106,0.06);
+}
+
 .hint {
   margin-top: 12px;
   font-size: 12px;
@@ -713,7 +822,10 @@ body.cinematic-mode .fightClub,
 body.cinematic-mode .bases,
 body.cinematic-mode .side,
 body.cinematic-mode .lane,
-body.cinematic-mode .hint {
+body.cinematic-mode .hint,
+body.cinematic-mode .myRewards,
+body.cinematic-mode .matchHistory,
+body.cinematic-mode .rewardHud {
   display: none;
 }
 

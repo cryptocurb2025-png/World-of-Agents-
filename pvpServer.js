@@ -14,9 +14,10 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 
-import { createAgent } from "./Agent.js";
+import { createAgent, isAlive, regenMana } from "./Agent.js";
 import { createGameState, addHeroToGame, getFullGameStatus, logEvent, moveHeroToLane } from "./GameState.js";
-import { processTick } from "./CombatEngine.js";
+import { processTick, heroBasicAttack, heroUseAbility, canUseAbility } from "./CombatEngine.js";
+import { isAbilityReady, canAffordAbility } from "./Ability.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,14 +92,22 @@ function createPlayer(id, name) {
 }
 
 function findMatch() {
-  if (queue.length < 2) return null;
+  if (queue.length < 1) return null;
 
   const p1 = queue.shift();
-  const p2 = queue.shift();
+  
+  // If no opponent, create practice mode vs AI
+  const vsAI = queue.length < 1;
+  const p2 = vsAI ? {
+    id: "ai_bot",
+    name: "AI Bot",
+    isAI: true,
+  } : queue.shift();
 
   const gameId = `pvp_${gameIdCounter++}`;
   const game = createGameState(gameId);
   game.mode = "pvp";
+  game.isPractice = vsAI;
   game.players = {
     alliance: { id: p1.id, name: p1.name },
     horde: { id: p2.id, name: p2.name },
@@ -126,10 +135,17 @@ function initPvPGame(gameId) {
   if (!game) return;
 
   const allianceHero = createSelectedHero(game.selectedHeroes.alliance, "alliance");
-  const hordeHero = createSelectedHero(game.selectedHeroes.horde, "horde");
+  const hordeHero = game.isPractice
+    ? createAIHero(game.selectedHeroes.horde || "MAGE", "horde")
+    : createSelectedHero(game.selectedHeroes.horde, "horde");
 
   addHeroToGame(game, allianceHero, "alliance", "mid");
   addHeroToGame(game, hordeHero, "horde", "mid");
+
+  // Add creep spawning to PvP games
+  game.spawnConfig = {
+    mid: { spawnEvery: 3, maxPerSide: 20, burst: 2, allianceType: "FOOTMAN", hordeType: "GRUNT" },
+  };
 
   game.phase = "active";
   game.tick = 0;
@@ -139,6 +155,14 @@ function initPvPGame(gameId) {
 function createSelectedHero(classType, faction) {
   const hero = createAgent(`${faction === "alliance" ? "Alliance" : "Horde"} Hero`, classType);
   hero.isPlayerControlled = true;
+  hero.faction = faction;
+  return hero;
+}
+
+function createAIHero(classType, faction) {
+  const hero = createAgent("AI Bot", classType);
+  hero.isPlayerControlled = false;
+  hero.faction = faction;
   return hero;
 }
 
@@ -194,6 +218,43 @@ function applyPlayerInputs(game) {
 
     inputs.moveDir = null;
     inputs.castAbility = null;
+  }
+
+  // AI bot logic for practice mode — uses real combat engine
+  if (game.isPractice) {
+    const playerHero = game.heroes.alliance[0];
+    const aiHero = game.heroes.horde[0];
+
+    if (playerHero && aiHero && isAlive(aiHero)) {
+      regenMana(aiHero);
+      const hpPct = aiHero.hp / aiHero.maxHp;
+
+      // State-based AI: retreat if low HP, otherwise aggressive
+      if (hpPct < 0.25 && isAlive(playerHero)) {
+        // DEFENSIVE: retreat toward horde base
+        aiHero.pos = Math.min(95, (aiHero.pos || 50) + 2);
+        // Try to heal if possible
+        const heal = aiHero.abilities.find((ab) => ab.type === "heal" && isAbilityReady(ab) && canAffordAbility(aiHero, ab));
+        if (heal) heroUseAbility(aiHero, playerHero, game, heal);
+      } else if (isAlive(playerHero)) {
+        // AGGRESSIVE: move toward player and fight
+        const aiPos = aiHero.pos || 50;
+        const pPos = playerHero.pos || -50;
+        const dist = Math.abs(aiPos - pPos);
+
+        if (dist > 15) {
+          aiHero.pos = aiPos + (pPos > aiPos ? 1.5 : -1.5);
+        } else if (game.tick % 3 === 0) {
+          // Pick best ability or basic attack
+          const bestAb = aiHero.abilities.find((ab) => isAbilityReady(ab) && canAffordAbility(aiHero, ab) && ab.type !== "heal");
+          if (bestAb) {
+            heroUseAbility(aiHero, playerHero, game, bestAb);
+          } else {
+            heroBasicAttack(aiHero, playerHero, game);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -508,9 +569,11 @@ setInterval(() => {
       game.heroSelectTimer++;
 
       const allSelected = game.selectedHeroes.alliance && game.selectedHeroes.horde;
-      if (allSelected || game.heroSelectTimer >= game.maxHeroSelectTime) {
+      const playerSelected = game.selectedHeroes.alliance && game.isPractice;
+      
+      if (allSelected || (playerSelected && game.heroSelectTimer > 10) || game.heroSelectTimer >= game.maxHeroSelectTime) {
         if (!game.selectedHeroes.alliance) game.selectedHeroes.alliance = "WARRIOR";
-        if (!game.selectedHeroes.horde) game.selectedHeroes.horde = "WARRIOR";
+        if (!game.selectedHeroes.horde) game.selectedHeroes.horde = "MAGE";
         initPvPGame(gameId);
       }
     }

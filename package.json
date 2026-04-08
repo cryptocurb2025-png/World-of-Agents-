@@ -5,7 +5,8 @@
   "type": "module",
   "main": "simulateMatch.js",
   "scripts": {
-    "start": "node simulateMatch.js",
+    "start": "node spectatorServer.js",
+    "simulate": "node simulateMatch.js",
     "spectator": "node spectatorServer.js",
     "pvp": "node pvpServer.js",
     "phase1": "node phase1/server.js"

@@ -17,89 +17,114 @@ const BROADCAST_RATE = Number(process.env.BROADCAST_RATE || 10);
 
 const DATA_DIR = path.join(__dirname, "data");
 const REWARD_LEDGER_FILE = path.join(DATA_DIR, "reward-ledger.json");
+const PLAYER_BALANCES_FILE = path.join(DATA_DIR, "player-balances.json");
 const WOA_PER_GOLD = 1 / 20;
 const WOA_PER_ROUND_CAP = 120;
+const DAILY_SOFT_CAP = 900;
+const DAILY_HARD_CAP = 1500;
+const CLAIM_THRESHOLD = 100;
+const CLAIM_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+const PARTICIPATION_GATE = 0.35;
 
 const FIGHT_CLUB_ROUNDS = [
   {
-    id: "ogres-vs-mages",
-    title: "Round 1: Ogres vs Mages",
-    subtitle: "Brutality vs Polymorph trickery",
-    durationTicks: 520,
+    id: "humans-vs-orcs",
+    title: "Round 1: Human Legion vs Orc Horde",
+    subtitle: "Footmen, Archers & Knights charge into battle",
+    durationTicks: 800,
     spawnConfig: {
-      top: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
-      mid: { spawnEvery: 2, maxPerSide: 48, burst: 2, allianceType: "OGRE", hordeType: "BATTLE_MAGE" },
-      bot: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
+      mid: { spawnEvery: 1, maxPerSide: 120, burst: 6, allianceType: ["FOOTMAN", "ARCHER", "KNIGHT"], hordeType: ["GRUNT", "TROLL", "OGRE"] },
     },
     allianceHero: {
-      name: "Drokhan Ogre Chief",
+      name: "Lord Commander Uther",
       classType: "WARRIOR",
       lane: "mid",
-      hpScale: 1.45,
-      damageScale: 1.35,
-      manaScale: 0.8,
-    },
-    hordeHero: {
-      name: "Archmage Selindra",
-      classType: "MAGE",
-      lane: "mid",
-      hpScale: 1.0,
+      hpScale: 2.0,
       damageScale: 1.5,
-      manaScale: 1.3,
-    },
-  },
-  {
-    id: "peasants-vs-grunts",
-    title: "Round 2: Peasants vs Grunts",
-    subtitle: "Numbers and grit against raw Orc power",
-    durationTicks: 520,
-    spawnConfig: {
-      top: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
-      mid: { spawnEvery: 2, maxPerSide: 64, burst: 3, allianceType: "PEASANT", hordeType: "GRUNT" },
-      bot: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
-    },
-    allianceHero: {
-      name: "Foreman Brigg",
-      classType: "HEALER",
-      lane: "mid",
-      hpScale: 1.1,
-      damageScale: 1.0,
-      manaScale: 1.25,
-    },
-    hordeHero: {
-      name: "Gor'mak Warleader",
-      classType: "RANGER",
-      lane: "mid",
-      hpScale: 1.35,
-      damageScale: 1.35,
-      manaScale: 0.9,
-    },
-  },
-  {
-    id: "dk-vs-ballistas",
-    title: "Round 3: Death Knights vs Ballistas",
-    subtitle: "Dark riders charging through siege volleys",
-    durationTicks: 560,
-    spawnConfig: {
-      top: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
-      mid: { spawnEvery: 1, maxPerSide: 72, burst: 4, allianceType: "DEATH_KNIGHT", hordeType: "BALLISTA" },
-      bot: { spawnEvery: 99999, maxPerSide: 0, burst: 0, allianceType: "PEASANT", hordeType: "PEASANT" },
-    },
-    allianceHero: {
-      name: "Morvane the Fallen",
-      classType: "WARRIOR",
-      lane: "mid",
-      hpScale: 1.6,
-      damageScale: 1.4,
       manaScale: 1.0,
     },
     hordeHero: {
-      name: "Iron Siege Marshal",
+      name: "Warchief Thrall",
+      classType: "WARRIOR",
+      lane: "mid",
+      hpScale: 2.2,
+      damageScale: 1.4,
+      manaScale: 1.2,
+    },
+  },
+  {
+    id: "elves-vs-trolls",
+    title: "Round 2: High Elves vs Forest Trolls",
+    subtitle: "Arcane archers and mages against feral warriors",
+    durationTicks: 800,
+    spawnConfig: {
+      mid: { spawnEvery: 1, maxPerSide: 140, burst: 8, allianceType: ["RIFLEMAN", "ARCHER", "BATTLE_MAGE"], hordeType: ["TROLL", "TROLL_AXER", "WOLF_RIDER"] },
+    },
+    allianceHero: {
+      name: "Archmage Antonidas",
       classType: "MAGE",
       lane: "mid",
-      hpScale: 1.15,
+      hpScale: 1.2,
+      damageScale: 2.0,
+      manaScale: 2.0,
+    },
+    hordeHero: {
+      name: "Shadow Hunter Vol'jin",
+      classType: "HEALER",
+      lane: "mid",
+      hpScale: 1.4,
       damageScale: 1.2,
-      manaScale: 1.4,
+      manaScale: 1.8,
+    },
+  },
+  {
+    id: "knights-vs-ogres",
+    title: "Round 3: Death Knights vs Ogre Warlords",
+    subtitle: "Dark cavalry and siege engines clash",
+    durationTicks: 900,
+    spawnConfig: {
+      mid: { spawnEvery: 1, maxPerSide: 100, burst: 5, allianceType: ["DEATH_KNIGHT", "KNIGHT", "BALLISTA"], hordeType: ["OGRE", "OGRE_LORD", "CATAPULT"] },
+    },
+    allianceHero: {
+      name: "Death Knight Arthas",
+      classType: "WARRIOR",
+      lane: "mid",
+      hpScale: 2.5,
+      damageScale: 1.8,
+      manaScale: 0.8,
+    },
+    hordeHero: {
+      name: "Ogre Chief Grom",
+      classType: "WARRIOR",
+      lane: "mid",
+      hpScale: 3.0,
+      damageScale: 2.2,
+      manaScale: 0.5,
+    },
+  },
+  {
+    id: "siege_legions",
+    title: "Round 4: Grand Siege",
+    subtitle: "All units - Knights, Ballistas, Giants",
+    durationTicks: 1000,
+    spawnConfig: {
+      mid: { spawnEvery: 1, maxPerSide: 160, burst: 10, allianceType: ["KNIGHT", "FOOTMAN", "BALLISTA", "DEATH_KNIGHT"], hordeType: ["OGRE_LORD", "GRUNT", "CATAPULT", "OGRE"] },
+    },
+    allianceHero: {
+      name: "Paladin Prophet",
+      classType: "HEALER",
+      lane: "mid",
+      hpScale: 1.8,
+      damageScale: 1.2,
+      manaScale: 2.2,
+    },
+    hordeHero: {
+      name: "Chaos Warlord",
+      classType: "MAGE",
+      lane: "mid",
+      hpScale: 1.5,
+      damageScale: 2.5,
+      manaScale: 1.5,
     },
   },
 ];
@@ -112,6 +137,63 @@ const fightClub = {
 };
 
 const rewardLedger = loadRewardLedger();
+const playerBalances = loadPlayerBalances();
+const sessions = new Map(); // ws -> { sessionId, connectedAt, ticksPresent }
+const sessionIndex = new Map(); // sessionId -> Set<ws>
+
+function loadPlayerBalances() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(PLAYER_BALANCES_FILE)) {
+    const initial = { players: {}, updatedAt: new Date().toISOString() };
+    fs.writeFileSync(PLAYER_BALANCES_FILE, JSON.stringify(initial, null, 2), "utf8");
+    return initial;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(PLAYER_BALANCES_FILE, "utf8"));
+  } catch {
+    return { players: {}, updatedAt: new Date().toISOString() };
+  }
+}
+
+function persistPlayerBalances() {
+  playerBalances.updatedAt = new Date().toISOString();
+  fs.writeFileSync(PLAYER_BALANCES_FILE, JSON.stringify(playerBalances, null, 2), "utf8");
+}
+
+function ensurePlayer(sessionId) {
+  if (!playerBalances.players[sessionId]) {
+    playerBalances.players[sessionId] = {
+      pending: 0,
+      totalEarned: 0,
+      totalClaimed: 0,
+      dailyEarned: 0,
+      dailyDate: new Date().toISOString().slice(0, 10),
+      lastClaimAt: null,
+    };
+  }
+  const p = playerBalances.players[sessionId];
+  const today = new Date().toISOString().slice(0, 10);
+  if (p.dailyDate !== today) {
+    p.dailyEarned = 0;
+    p.dailyDate = today;
+  }
+  return p;
+}
+
+function applyDailyCap(player, rawWoa) {
+  if (player.dailyEarned >= DAILY_HARD_CAP) return 0;
+  let amount = rawWoa;
+  if (player.dailyEarned >= DAILY_SOFT_CAP) {
+    const degradation = Math.max(0, 1 - (player.dailyEarned - DAILY_SOFT_CAP) / (DAILY_HARD_CAP - DAILY_SOFT_CAP));
+    amount = Math.floor(rawWoa * degradation);
+  }
+  const capped = Math.min(amount, DAILY_HARD_CAP - player.dailyEarned);
+  return Math.max(0, capped);
+}
+
+function generateSessionId() {
+  return `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function loadRewardLedger() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -230,6 +312,30 @@ function finalizeRoundAndAdvance() {
   }
   persistRewardLedger();
 
+  // Per-player reward distribution with participation gate + daily caps
+  const qualifiedSessions = [];
+  for (const [ws, info] of sessions) {
+    const presence = round.durationTicks > 0 ? info.ticksPresent / round.durationTicks : 0;
+    if (presence >= PARTICIPATION_GATE) {
+      qualifiedSessions.push(info.sessionId);
+    }
+    info.ticksPresent = 0; // Reset for next round
+  }
+
+  if (qualifiedSessions.length > 0) {
+    const perPlayerWoa = Math.floor(Math.max(rewards.allianceWoa, rewards.hordeWoa) / qualifiedSessions.length);
+    for (const sid of qualifiedSessions) {
+      const player = ensurePlayer(sid);
+      const capped = applyDailyCap(player, Math.min(perPlayerWoa, WOA_PER_ROUND_CAP));
+      if (capped > 0) {
+        player.pending += capped;
+        player.totalEarned += capped;
+        player.dailyEarned += capped;
+      }
+    }
+    persistPlayerBalances();
+  }
+
   fightClub.roundIndex = (fightClub.roundIndex + 1) % FIGHT_CLUB_ROUNDS.length;
   gameState = initRoundState(fightClub.roundIndex);
 }
@@ -312,6 +418,12 @@ function getSpectatorState() {
 
 setInterval(() => {
   processTick(gameState);
+
+  // Track presence for every connected session this tick
+  for (const [, info] of sessions) {
+    info.ticksPresent++;
+  }
+
   const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
 
   if (gameState.winner || gameState.tick >= round.durationTicks) {
@@ -392,6 +504,49 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  if (req.method === "GET" && pathname === "/api/balance") {
+    const sessionId = url.searchParams.get("sessionId");
+    if (!sessionId) return sendJson(res, 400, { error: "sessionId required" });
+    const player = playerBalances.players[sessionId];
+    if (!player) return sendJson(res, 200, { pending: 0, totalEarned: 0, totalClaimed: 0, dailyEarned: 0 });
+    return sendJson(res, 200, {
+      pending: player.pending,
+      totalEarned: player.totalEarned,
+      totalClaimed: player.totalClaimed,
+      dailyEarned: player.dailyEarned,
+      dailyDate: player.dailyDate,
+      nextClaimAt: player.lastClaimAt ? new Date(new Date(player.lastClaimAt).getTime() + CLAIM_COOLDOWN_MS).toISOString() : null,
+    });
+  }
+
+  if (req.method === "POST" && pathname === "/api/claim") {
+    try {
+      const body = await readJsonBody(req);
+      const sessionId = String(body.sessionId || "");
+      if (!sessionId) return sendJson(res, 400, { error: "sessionId required" });
+      const player = playerBalances.players[sessionId];
+      if (!player) return sendJson(res, 404, { error: "Session not found" });
+      if (player.pending < CLAIM_THRESHOLD) {
+        return sendJson(res, 400, { error: `Minimum ${CLAIM_THRESHOLD} WOA required to claim` });
+      }
+      if (player.lastClaimAt) {
+        const elapsed = Date.now() - new Date(player.lastClaimAt).getTime();
+        if (elapsed < CLAIM_COOLDOWN_MS) {
+          const waitSec = Math.ceil((CLAIM_COOLDOWN_MS - elapsed) / 1000);
+          return sendJson(res, 429, { error: `Claim cooldown: wait ${waitSec}s` });
+        }
+      }
+      const claimed = player.pending;
+      player.totalClaimed += claimed;
+      player.pending = 0;
+      player.lastClaimAt = new Date().toISOString();
+      persistPlayerBalances();
+      return sendJson(res, 200, { ok: true, claimed, remaining: 0 });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
   if (req.method === "POST" && pathname === "/api/predict") {
     try {
       const body = await readJsonBody(req);
@@ -456,8 +611,29 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-wss.on("connection", (ws) => {
-  ws.send(JSON.stringify({ type: "state", data: getSpectatorState() }));
+wss.on("connection", (ws, req) => {
+  // Extract or generate session ID
+  const wsUrl = new URL(req.url || "/ws", `http://${req.headers.host || "localhost"}`);
+  let sessionId = wsUrl.searchParams.get("sessionId") || generateSessionId();
+  ensurePlayer(sessionId);
+
+  const info = { sessionId, connectedAt: Date.now(), ticksPresent: 0 };
+  sessions.set(ws, info);
+  if (!sessionIndex.has(sessionId)) sessionIndex.set(sessionId, new Set());
+  sessionIndex.get(sessionId).add(ws);
+
+  const initPayload = getSpectatorState();
+  initPayload.sessionId = sessionId;
+  ws.send(JSON.stringify({ type: "state", data: initPayload }));
+
+  ws.on("close", () => {
+    sessions.delete(ws);
+    const subs = sessionIndex.get(sessionId);
+    if (subs) {
+      subs.delete(ws);
+      if (subs.size === 0) sessionIndex.delete(sessionId);
+    }
+  });
 });
 
 setInterval(() => {

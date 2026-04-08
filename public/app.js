@@ -8,6 +8,7 @@ const el = {
   predictAlliance: document.getElementById("predict-alliance"),
   predictHorde: document.getElementById("predict-horde"),
   cinematicToggle: document.getElementById("cinematic-toggle"),
+  audioToggle: document.getElementById("audio-toggle"),
 
   baseAllianceHp: document.getElementById("base-alliance-hp"),
   baseHordeHp: document.getElementById("base-horde-hp"),
@@ -17,16 +18,16 @@ const el = {
   towersSummary: document.getElementById("towers-summary"),
   heroesSummary: document.getElementById("heroes-summary"),
 
+  rewardPoolAlliance: document.getElementById("reward-pool-alliance"),
+  rewardPoolHorde: document.getElementById("reward-pool-horde"),
+  rewardRounds: document.getElementById("reward-rounds"),
+
+  myPending: document.getElementById("my-pending-woa"),
+  claimBtn: document.getElementById("claim-btn"),
+  claimStatus: document.getElementById("claim-status"),
+  matchHistory: document.getElementById("match-history-body"),
+
   lanes: {
-    top: {
-      frontline: document.getElementById("lane-top-frontline"),
-      heroAName: document.getElementById("lane-top-hero-alliance-name"),
-      heroAIcon: document.getElementById("lane-top-hero-alliance-icon"),
-      heroHName: document.getElementById("lane-top-hero-horde-name"),
-      heroHIcon: document.getElementById("lane-top-hero-horde-icon"),
-      pin: document.getElementById("lane-top-pin"),
-      root: document.getElementById("lane-top"),
-    },
     mid: {
       frontline: document.getElementById("lane-mid-frontline"),
       heroAName: document.getElementById("lane-mid-hero-alliance-name"),
@@ -36,15 +37,6 @@ const el = {
       pin: document.getElementById("lane-mid-pin"),
       root: document.getElementById("lane-mid"),
     },
-    bot: {
-      frontline: document.getElementById("lane-bot-frontline"),
-      heroAName: document.getElementById("lane-bot-hero-alliance-name"),
-      heroAIcon: document.getElementById("lane-bot-hero-alliance-icon"),
-      heroHName: document.getElementById("lane-bot-hero-horde-name"),
-      heroHIcon: document.getElementById("lane-bot-hero-horde-icon"),
-      pin: document.getElementById("lane-bot-pin"),
-      root: document.getElementById("lane-bot"),
-    },
   },
 
   heroCardsAlliance: document.getElementById("heroes-alliance"),
@@ -52,6 +44,17 @@ const el = {
   events: document.getElementById("events"),
   canvas: document.getElementById("battlemap"),
 };
+
+// --- Session management ---
+let sessionId = localStorage.getItem("woa-sessionId") || null;
+
+function setSessionId(id) {
+  sessionId = id;
+  localStorage.setItem("woa-sessionId", id);
+}
+
+// --- Kill feed ---
+const killFeed = []; // { text, color, time }
 
 let ws = null;
 let latestState = null;
@@ -65,78 +68,102 @@ let prevEventCount = 0;
 const seenEventKeys = new Set();
 const map = createMapRenderer(el.canvas);
 
+// --- Death tracker for animations ---
+const deathTimestamps = new Map(); // heroName -> timestamp
+
+// --- Procedural Audio Engine ---
 class AudioManager {
   constructor() {
     this.enabled = false;
     this.ctx = null;
-    this.buffers = new Map();
-    this.volume = 0.4;
+    this.volume = 0.3;
+    this.muted = localStorage.getItem("woa-muted") === "1";
   }
 
-  async init() {
+  init() {
     if (this.ctx) return;
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      this.enabled = true;
+      this.enabled = !this.muted;
     } catch (e) {
       console.warn("Audio init failed:", e);
     }
   }
 
-  async loadSound(name, url) {
-    if (!this.ctx) return;
-    try {
-      const res = await fetch(url);
-      const arr = await res.arrayBuffer();
-      const buf = await this.ctx.decodeAudioData(arr);
-      this.buffers.set(name, buf);
-    } catch (e) {
-      console.warn(`Audio load failed: ${name}`, e);
-    }
+  toggleMute() {
+    this.muted = !this.muted;
+    this.enabled = !this.muted;
+    localStorage.setItem("woa-muted", this.muted ? "1" : "0");
+    return this.muted;
   }
 
-  play(name, options = {}) {
-    if (!this.enabled || !this.ctx || !this.buffers.has(name)) return;
-    const buf = this.buffers.get(name);
+  _noise(duration, filterFreq) {
+    if (!this.enabled || !this.ctx) return;
+    const sr = this.ctx.sampleRate;
+    const len = Math.floor(sr * duration);
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = filterFreq || 2000;
     const gain = this.ctx.createGain();
-    gain.gain.value = options.volume ?? this.volume;
-    src.connect(gain);
+    gain.gain.setValueAtTime(this.volume * 0.5, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+    src.connect(filter);
+    filter.connect(gain);
     gain.connect(this.ctx.destination);
-    src.start(0);
+    src.start();
   }
 
-  onRoundStart(callback) {
-    this._onRoundStart = callback;
+  _tone(freq, duration, type, vol) {
+    if (!this.enabled || !this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = type || "square";
+    osc.frequency.value = freq;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime((vol || this.volume) * 0.4, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + duration);
   }
 
-  onAttack(callback) {
-    this._onAttack = callback;
+  playAttack() { this._noise(0.05, 2000); }
+  playAbility(type) {
+    if (!this.enabled || !this.ctx) return;
+    if (type === "heal") { this._tone(523, 0.15, "sine", this.volume * 0.6); this._tone(659, 0.15, "sine", this.volume * 0.4); }
+    else if (type === "stun") { this._tone(220, 0.08, "sawtooth"); this._tone(440, 0.08, "sawtooth"); }
+    else if (type === "slow" || type === "frost") { this._tone(300, 0.2, "triangle"); }
+    else { this._tone(350, 0.12, "sawtooth"); this._tone(700, 0.08, "square"); }
   }
+  playKill() {
+    if (!this.enabled || !this.ctx) return;
+    this._tone(80, 0.15, "sawtooth", this.volume);
+    setTimeout(() => this._tone(1200, 0.1, "square", this.volume * 0.6), 50);
+  }
+  playRoundStart() {
+    if (!this.enabled || !this.ctx) return;
+    this._tone(440, 0.12, "square", this.volume * 0.5);
+    setTimeout(() => this._tone(523, 0.12, "square", this.volume * 0.5), 120);
+    setTimeout(() => this._tone(659, 0.18, "square", this.volume * 0.6), 240);
+  }
+  playTowerDestroy() { this._noise(0.2, 800); this._tone(100, 0.2, "sawtooth"); }
 
-  onDeath(callback) {
-    this._onDeath = callback;
-  }
-
-  emitRoundStart(roundId) {
-    if (this._onRoundStart) this._onRoundStart(roundId);
-  }
-
-  emitAttack(targetId) {
-    if (this._onAttack) this._onAttack(targetId);
-  }
-
-  emitDeath(unitId) {
-    if (this._onDeath) this._onDeath(unitId);
-  }
+  emitRoundStart() { this.playRoundStart(); }
+  emitAttack() { this.playAttack(); }
+  emitDeath() { this.playKill(); }
 }
 
 const audio = new AudioManager();
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${protocol}//${window.location.host}/ws`;
+  const sidParam = sessionId ? `?sessionId=${sessionId}` : "";
+  const url = `${protocol}//${window.location.host}/ws${sidParam}`;
 
   setConnection("Connecting...", "connecting");
   ws = new WebSocket(url);
@@ -151,6 +178,10 @@ function connect() {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type !== "state") return;
+      // Capture session ID from server
+      if (msg.data.sessionId && !sessionId) {
+        setSessionId(msg.data.sessionId);
+      }
       latestState = msg.data;
       schedulePaint();
     } catch {
@@ -207,19 +238,24 @@ function classSpritePath(heroClass, faction) {
   if (cls === "MAGE") return "/assets/units/battle-mage-pixel.svg";
   if (cls === "RANGER") return "/assets/heroes/ranger-pixel.svg";
   if (cls === "HEALER") return "/assets/heroes/healer-pixel.svg";
-  if (cls === "WARRIOR") return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/ogre-pixel.svg";
-  return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/grunt-pixel.svg";
+  if (cls === "WARRIOR") return faction === "alliance" ? "/assets/heroes/warrior-pixel.svg" : "/assets/units/ogre-pixel.svg";
+  return faction === "alliance" ? "/assets/heroes/warrior-pixel.svg" : "/assets/units/grunt-pixel.svg";
 }
 
 function unitSpritePath(type, faction) {
   const t = String(type || "").toUpperCase();
-  if (t === "OGRE") return "/assets/units/ogre-pixel.svg";
+  if (t === "OGRE" || t === "OGRE_LORD") return "/assets/units/ogre-pixel.svg";
   if (t === "BATTLE_MAGE") return "/assets/units/battle-mage-pixel.svg";
   if (t === "PEASANT") return "/assets/units/peasant-pixel.svg";
   if (t === "GRUNT") return "/assets/units/grunt-pixel.svg";
   if (t === "DEATH_KNIGHT") return "/assets/units/death-knight-pixel.svg";
   if (t === "BALLISTA") return "/assets/units/ballista-pixel.svg";
-  if (t === "FOOTMAN") return "/assets/heroes/hero-placeholder.svg";
+  if (t === "FOOTMAN") return "/assets/units/footman-pixel.svg";
+  if (t === "KNIGHT") return "/assets/units/knight-pixel.svg";
+  if (t === "RIFLEMAN" || t === "ARCHER") return "/assets/heroes/ranger-pixel.svg";
+  if (t === "TROLL" || t === "TROLL_AXER") return "/assets/units/troll-pixel.svg";
+  if (t === "WOLF_RIDER") return "/assets/units/grunt-pixel.svg";
+  if (t === "CATAPULT") return "/assets/units/ballista-pixel.svg";
   return faction === "alliance" ? "/assets/heroes/hero-placeholder.svg" : "/assets/units/grunt-pixel.svg";
 }
 
@@ -229,10 +265,17 @@ const UNIT_MAX_HP_BY_TYPE = {
   RIFLEMAN: 35,
   AXETHROWER: 35,
   OGRE: 88,
+  OGRE_LORD: 150,
+  TROLL: 60,
+  TROLL_AXER: 45,
   BATTLE_MAGE: 45,
   PEASANT: 36,
   DEATH_KNIGHT: 90,
   BALLISTA: 55,
+  KNIGHT: 100,
+  ARCHER: 40,
+  WOLF_RIDER: 55,
+  CATAPULT: 80,
 };
 
 function heroAccent(heroClass, faction) {
@@ -246,10 +289,21 @@ function heroAccent(heroClass, faction) {
 
 function eventVisualStyle(event) {
   const ability = String(event.ability || "").toLowerCase();
+  const atype = String(event.type || "").toLowerCase();
+  // Ability-specific VFX
   if (ability.includes("fireball")) return { color: "#ffb35c", glow: "rgba(255,140,60,0.45)", radius: 4.2, arc: -10 };
-  if (ability.includes("holy")) return { color: "#87efb8", glow: "rgba(135,239,184,0.42)", radius: 3.8, arc: -6 };
-  if (ability.includes("shield")) return { color: "#f0c96a", glow: "rgba(240,201,106,0.40)", radius: 3.4, arc: 1 };
+  if (ability.includes("blizzard")) return { color: "#7ac5ff", glow: "rgba(122,197,255,0.50)", radius: 5.5, arc: -2 };
+  if (ability.includes("frost")) return { color: "#a0e8ff", glow: "rgba(160,232,255,0.48)", radius: 3.8, arc: -6 };
+  if (ability.includes("thunder")) return { color: "#ffe066", glow: "rgba(255,224,102,0.50)", radius: 5.0, arc: 0 };
+  if (ability.includes("holy") || ability.includes("chain heal")) return { color: "#87efb8", glow: "rgba(135,239,184,0.42)", radius: 3.8, arc: -6 };
+  if (ability.includes("shield") || ability.includes("battle shout")) return { color: "#f0c96a", glow: "rgba(240,201,106,0.40)", radius: 3.4, arc: 1 };
   if (ability.includes("multi")) return { color: "#b9ecff", glow: "rgba(120,200,255,0.40)", radius: 2.8, arc: 5 };
+  if (ability.includes("poison")) return { color: "#8fff8f", glow: "rgba(80,255,80,0.40)", radius: 3.2, arc: -4 };
+  if (ability.includes("stomp") || ability.includes("war")) return { color: "#ffdd44", glow: "rgba(255,221,68,0.50)", radius: 4.8, arc: 0 };
+  // Type-based fallbacks
+  if (atype === "stun") return { color: "#ffdd44", glow: "rgba(255,221,68,0.50)", radius: 4.0, arc: 0 };
+  if (atype === "slow") return { color: "#a0e8ff", glow: "rgba(160,232,255,0.45)", radius: 3.5, arc: -3 };
+  if (atype === "dot") return { color: "#8fff8f", glow: "rgba(80,255,80,0.40)", radius: 3.0, arc: -2 };
   if (event.type === "hero_kill") return { color: "#ff5c7a", glow: "rgba(255,92,122,0.50)", radius: 5.2, arc: 0 };
   if (event.type === "tower_attack") return { color: "#ffd68e", glow: "rgba(255,214,142,0.38)", radius: 3.2, arc: 2 };
   return { color: "#9ad7ff", glow: "rgba(154,215,255,0.36)", radius: 2.8, arc: 3 };
@@ -275,6 +329,12 @@ function render(state) {
     setText(el.roundMeta, `Round Tick ${fightClub.roundTick}/${fightClub.round.durationTicks} | Score Alliance ${fightClub.wins.alliance} - Horde ${fightClub.wins.horde}`);
     const p = fightClub.prediction;
     setText(el.predictionStats, `Votes ${p.total} | Alliance ${p.alliancePct}% (${p.alliance}) | Horde ${p.hordePct}% (${p.horde})`);
+    
+    if (fightClub.rewards) {
+      setText(el.rewardPoolAlliance, `${fightClub.rewards.totalAlliance} $WOA`);
+      setText(el.rewardPoolHorde, `${fightClub.rewards.totalHorde} $WOA`);
+      setText(el.rewardRounds, fightClub.rewards.roundsTracked);
+    }
   }
 
   renderStronghold(state.strongholds.alliance, el.baseAllianceHp, el.baseAllianceBar);
@@ -291,28 +351,51 @@ function render(state) {
   for (const h of aHeroes) heroByName.set(h.name, h);
   for (const h of hHeroes) heroByName.set(h.name, h);
 
-  renderLane("top", state.lanes.top, heroByName);
   renderLane("mid", state.lanes.mid, heroByName);
-  renderLane("bot", state.lanes.bot, heroByName);
 
   setText(el.heroesSummary, `${aHeroes.length + hHeroes.length} heroes`);
   renderHeroCards(el.heroCardsAlliance, aHeroes, "alliance");
   renderHeroCards(el.heroCardsHorde, hHeroes, "horde");
   renderEvents(state.recentEvents || []);
 
+  // Match history
+  if (fightClub && fightClub.history && el.matchHistory) {
+    el.matchHistory.innerHTML = fightClub.history.slice(-6).reverse().map((h) => {
+      const wColor = h.winner === "alliance" ? "var(--alliance)" : h.winner === "horde" ? "var(--horde)" : "var(--muted)";
+      return `<tr><td>${escapeHtml(h.title)}</td><td style="color:${wColor}">${h.winner}</td><td>${h.rewards?.allianceWoa || 0}</td><td>${h.rewards?.hordeWoa || 0}</td></tr>`;
+    }).join("");
+  }
+
   if (fightClub && fightClub.round && fightClub.round.id !== lastRoundId) {
     lastRoundId = fightClub.round.id;
-    audio.emitRoundStart(lastRoundId);
+    audio.emitRoundStart();
   }
 
   const events = state.recentEvents || [];
   if (events.length > prevEventCount) {
     const newEvents = events.slice(prevEventCount);
     for (const e of newEvents) {
-      if (e.type === "unit_death" || e.type === "hero_death") {
-        audio.emitDeath(e.targetId || e.unitId || e.name);
-      } else if (e.type === "attack" || e.type === "hero_attack") {
-        audio.emitAttack(e.targetId || e.unitId);
+      if (e.type === "hero_kill") {
+        audio.emitDeath();
+        killFeed.push({
+          text: `${e.killer} killed ${e.victim}`,
+          color: "#ff5c7a",
+          time: performance.now(),
+        });
+        deathTimestamps.set(e.victim, performance.now());
+        if (killFeed.length > 5) killFeed.shift();
+      } else if (e.type === "hero_attack" || e.type === "attack") {
+        audio.emitAttack();
+      } else if (e.type === "ability_used") {
+        audio.playAbility(e.type === "ability_used" ? (e.ability || "").toLowerCase() : "damage");
+      } else if (e.type === "tower_destroyed") {
+        audio.playTowerDestroy();
+        killFeed.push({
+          text: `${e.destroyer} destroyed ${e.tower}`,
+          color: "#ffd68e",
+          time: performance.now(),
+        });
+        if (killFeed.length > 5) killFeed.shift();
       }
     }
   }
@@ -568,8 +651,9 @@ function createMapRenderer(canvas) {
 
     drawProjectiles(now);
     drawEffects();
-    drawHitFlashes(now);
+    drawHitFlashes(now, state);
     drawGroundRings(now);
+    drawKillFeed(now);
   }
 
   function drawMapFrame() {
@@ -669,7 +753,29 @@ function createMapRenderer(canvas) {
     const sprite = loadSprite(classSpritePath(hero.class, faction));
     const accent = heroAccent(hero.class, faction);
 
-    ctx.globalAlpha = hero.alive ? 1 : 0.4;
+    // Death animation: fade out over 500ms then show skull
+    if (!hero.alive) {
+      const deathTime = deathTimestamps.get(hero.name);
+      if (deathTime) {
+        const age = now - deathTime;
+        if (age < 500) {
+          ctx.globalAlpha = Math.max(0.1, 1 - age / 500);
+        } else {
+          // Draw skull marker
+          ctx.globalAlpha = 0.6;
+          ctx.font = "18px serif";
+          ctx.fillStyle = "#ff5c7a";
+          ctx.fillText("\u2620", x - 8, y + 6);
+          ctx.globalAlpha = 1;
+          return;
+        }
+      } else {
+        ctx.globalAlpha = 0.3;
+      }
+    } else {
+      ctx.globalAlpha = 1;
+    }
+
     const size = 42;
     if (sprite.complete) {
       ctx.fillStyle = "rgba(0,0,0,0.34)";
@@ -793,7 +899,7 @@ function createMapRenderer(canvas) {
     }
   }
 
-  function drawHitFlashes(now) {
+  function drawHitFlashes(now, state) {
     for (const [targetId, flash] of hitFlashes) {
       const age = now - flash.created;
       if (age >= flash.ttl) {
@@ -924,6 +1030,28 @@ function createMapRenderer(canvas) {
     }
   }
 
+  function drawKillFeed(now) {
+    const feedX = cssW - 12;
+    let feedY = 28;
+    ctx.textAlign = "right";
+    ctx.font = "bold 11px Manrope, sans-serif";
+    for (let i = killFeed.length - 1; i >= 0; i--) {
+      const entry = killFeed[i];
+      const age = now - entry.time;
+      if (age > 5000) { killFeed.splice(i, 1); continue; }
+      const alpha = age > 4000 ? (5000 - age) / 1000 : 1;
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      const tw = ctx.measureText(entry.text).width;
+      ctx.fillRect(feedX - tw - 8, feedY - 10, tw + 16, 16);
+      ctx.fillStyle = entry.color;
+      ctx.fillText(entry.text, feedX, feedY);
+      feedY += 20;
+    }
+    ctx.textAlign = "left";
+    ctx.globalAlpha = 1;
+  }
+
   function roundRect(c, x, y, w, h, r) {
     c.beginPath();
     c.moveTo(x + r, y);
@@ -947,6 +1075,60 @@ function createMapRenderer(canvas) {
   };
 }
 
+function attachAudioHandler() {
+  const saved = localStorage.getItem("woa-muted") === "1";
+  if (el.audioToggle) {
+    el.audioToggle.textContent = saved ? "Unmute" : "Mute";
+    el.audioToggle.addEventListener("click", () => {
+      audio.init(); // First click creates AudioContext (browser policy)
+      const muted = audio.toggleMute();
+      el.audioToggle.textContent = muted ? "Unmute" : "Mute";
+    });
+  }
+  // Init audio on first interaction
+  document.addEventListener("click", () => audio.init(), { once: true });
+}
+
+function attachClaimHandler() {
+  if (!el.claimBtn) return;
+  el.claimBtn.addEventListener("click", async () => {
+    if (!sessionId) return;
+    el.claimBtn.disabled = true;
+    try {
+      const res = await fetch("/api/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (el.claimStatus) setText(el.claimStatus, `Claimed ${data.claimed} $WOA!`);
+        if (el.myPending) setText(el.myPending, "0 $WOA");
+      } else {
+        if (el.claimStatus) setText(el.claimStatus, data.error || "Claim failed");
+      }
+    } catch {
+      if (el.claimStatus) setText(el.claimStatus, "Network error");
+    }
+    setTimeout(() => { el.claimBtn.disabled = false; }, 2000);
+  });
+}
+
+// Periodically fetch player balance
+setInterval(async () => {
+  if (!sessionId) return;
+  try {
+    const res = await fetch(`/api/balance?sessionId=${sessionId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (el.myPending) setText(el.myPending, `${data.pending} $WOA`);
+    if (el.claimBtn) el.claimBtn.disabled = data.pending < 100;
+    if (el.claimStatus && data.pending < 100) setText(el.claimStatus, `Need ${100 - data.pending} more to claim`);
+  } catch { /* ignore */ }
+}, 15000);
+
 attachPredictionHandlers();
 attachCinematicHandler();
+attachAudioHandler();
+attachClaimHandler();
 connect();

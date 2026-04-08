@@ -19,7 +19,7 @@
         </div>
       </div>
       <div class="conn">
-        <a href="/pvp.html" class="cinematicBtn" style="text-decoration:none;margin-right:12px;">PvP Arena</a>
+        <button id="audio-toggle" class="cinematicBtn" type="button">Mute</button>
         <button id="cinematic-toggle" class="cinematicBtn" type="button" aria-pressed="false">Cinematic View</button>
         <span class="conn__label">WebSocket:</span>
         <span id="status" class="connecting">Connecting...</span>
@@ -69,10 +69,38 @@
           </div>
         </section>
 
+        <!-- Reward HUD -->
+        <section class="rewardHud" aria-label="Global Rewards">
+          <div class="rewardHud__col">
+            <div class="rewardHud__label">Alliance Pool</div>
+            <div id="reward-pool-alliance" class="rewardHud__value">0 $WOA</div>
+          </div>
+          <div class="rewardHud__col">
+            <div class="rewardHud__label">Horde Pool</div>
+            <div id="reward-pool-horde" class="rewardHud__value">0 $WOA</div>
+          </div>
+          <div class="rewardHud__col">
+            <div class="rewardHud__label">Rounds Tracked</div>
+            <div id="reward-rounds" class="rewardHud__value">0</div>
+          </div>
+        </section>
+
+        <!-- My Rewards (per-player) -->
+        <section class="myRewards" aria-label="My Rewards">
+          <div class="myRewards__col">
+            <div class="rewardHud__label">My Pending</div>
+            <div id="my-pending-woa" class="rewardHud__value">0 $WOA</div>
+          </div>
+          <div class="myRewards__col">
+            <button id="claim-btn" class="claimBtn" type="button" disabled>Claim $WOA</button>
+            <div id="claim-status" class="claimStatus">Need 100 to claim</div>
+          </div>
+        </section>
+
         <section class="grid" aria-label="Battlefield">
           <section class="lanes" aria-label="Lanes">
             <header class="sectionHead">
-              <div class="sectionHead__title">Lanes</div>
+              <div class="sectionHead__title">Battle Arena</div>
               <div class="sectionHead__meta" id="towers-summary">Towers: -</div>
             </header>
 
@@ -86,35 +114,8 @@
               </div>
             </div>
 
-            <div class="lane" id="lane-top" data-lane="top">
-              <div class="lane__title">Top</div>
-              <div class="lane__frontline">
-                <div class="meter" aria-label="Top lane frontline">
-                  <div class="meter__fill" id="lane-top-bar" style="width:50%"></div>
-                  <div class="meter__pin" id="lane-top-pin" style="left:50%"></div>
-                </div>
-                <div class="lane__frontlineText" id="lane-top-frontline">Frontline: -</div>
-              </div>
-              <div class="lane__heroes">
-                <div class="slot slot--alliance">
-                  <div class="slot__label">Alliance</div>
-                  <div class="slot__value" id="lane-top-hero-alliance">
-                    <img class="unitIcon unitIcon--alliance" id="lane-top-hero-alliance-icon" src="/assets/heroes/hero-placeholder.svg" alt="" width="28" height="28" />
-                    <span class="unitName" id="lane-top-hero-alliance-name">-</span>
-                  </div>
-                </div>
-                <div class="slot slot--horde">
-                  <div class="slot__label">Horde</div>
-                  <div class="slot__value" id="lane-top-hero-horde">
-                    <img class="unitIcon unitIcon--horde" id="lane-top-hero-horde-icon" src="/assets/units/ogre-placeholder.svg" alt="" width="28" height="28" />
-                    <span class="unitName" id="lane-top-hero-horde-name">-</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <div class="lane" id="lane-mid" data-lane="mid">
-              <div class="lane__title">Mid</div>
+              <div class="lane__title">Mid (Fight Club)</div>
               <div class="lane__frontline">
                 <div class="meter" aria-label="Mid lane frontline">
                   <div class="meter__fill" id="lane-mid-bar" style="width:50%"></div>
@@ -135,33 +136,6 @@
                   <div class="slot__value" id="lane-mid-hero-horde">
                     <img class="unitIcon unitIcon--horde" id="lane-mid-hero-horde-icon" src="/assets/units/ogre-placeholder.svg" alt="" width="28" height="28" />
                     <span class="unitName" id="lane-mid-hero-horde-name">-</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="lane" id="lane-bot" data-lane="bot">
-              <div class="lane__title">Bot</div>
-              <div class="lane__frontline">
-                <div class="meter" aria-label="Bot lane frontline">
-                  <div class="meter__fill" id="lane-bot-bar" style="width:50%"></div>
-                  <div class="meter__pin" id="lane-bot-pin" style="left:50%"></div>
-                </div>
-                <div class="lane__frontlineText" id="lane-bot-frontline">Frontline: -</div>
-              </div>
-              <div class="lane__heroes">
-                <div class="slot slot--alliance">
-                  <div class="slot__label">Alliance</div>
-                  <div class="slot__value" id="lane-bot-hero-alliance">
-                    <img class="unitIcon unitIcon--alliance" id="lane-bot-hero-alliance-icon" src="/assets/heroes/hero-placeholder.svg" alt="" width="28" height="28" />
-                    <span class="unitName" id="lane-bot-hero-alliance-name">-</span>
-                  </div>
-                </div>
-                <div class="slot slot--horde">
-                  <div class="slot__label">Horde</div>
-                  <div class="slot__value" id="lane-bot-hero-horde">
-                    <img class="unitIcon unitIcon--horde" id="lane-bot-hero-horde-icon" src="/assets/units/ogre-placeholder.svg" alt="" width="28" height="28" />
-                    <span class="unitName" id="lane-bot-hero-horde-name">-</span>
                   </div>
                 </div>
               </div>
@@ -199,8 +173,20 @@
           </aside>
         </section>
 
+        <!-- Match History -->
+        <section class="panel matchHistory" aria-label="Match History">
+          <header class="sectionHead">
+            <div class="sectionHead__title">Match History</div>
+            <div class="sectionHead__meta">recent rounds</div>
+          </header>
+          <table class="historyTable">
+            <thead><tr><th>Round</th><th>Winner</th><th>A $WOA</th><th>H $WOA</th></tr></thead>
+            <tbody id="match-history-body"></tbody>
+          </table>
+        </section>
+
         <div class="hint">
-          JSON endpoint: <a href="/api/state">/api/state</a>
+          JSON endpoint: <a href="/api/state">/api/state</a> | <a href="/api/balance">/api/balance</a> | <a href="/api/rewards">/api/rewards</a>
         </div>
       </div>
     </main>
