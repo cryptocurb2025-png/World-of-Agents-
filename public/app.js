@@ -292,6 +292,36 @@ class AudioManager {
     return this._bgPlaying;
   }
 
+  playVictoryStinger() {
+    if (!this.enabled || !this.ctx) return;
+    // Triumphant ascending fanfare
+    const notes = [392, 440, 523, 659, 784];
+    notes.forEach((f, i) => {
+      setTimeout(() => this._tone(f, 0.25, "triangle", this.volume * 0.5), i * 120);
+    });
+    setTimeout(() => this._tone(784, 0.6, "sawtooth", this.volume * 0.3), 600);
+  }
+
+  playDefeatStinger() {
+    if (!this.enabled || !this.ctx) return;
+    // Descending somber tones
+    const notes = [392, 349, 293, 220];
+    notes.forEach((f, i) => {
+      setTimeout(() => this._tone(f, 0.3, "triangle", this.volume * 0.4), i * 200);
+    });
+  }
+
+  playSeriesWin(faction) {
+    if (!this.enabled || !this.ctx) return;
+    this.playVictoryStinger();
+    // Extra fanfare for series win
+    setTimeout(() => {
+      this._tone(523, 0.15, "square", this.volume * 0.3);
+      this._tone(659, 0.15, "square", this.volume * 0.3);
+      this._tone(784, 0.4, "sawtooth", this.volume * 0.4);
+    }, 800);
+  }
+
   emitRoundStart() { this.playRoundStart(); }
   emitAttack() { this.playAttack(); }
   emitDeath() { this.playKill(); }
@@ -468,8 +498,17 @@ function render(state) {
 
   if (fightClub) {
     setText(el.roundTitle, fightClub.round.title);
-    setText(el.roundSubtitle, fightClub.round.subtitle);
-    setText(el.roundMeta, `Round Tick ${fightClub.roundTick}/${fightClub.round.durationTicks} | Score Alliance ${fightClub.wins.alliance} - Horde ${fightClub.wins.horde}`);
+    const cmds = fightClub.commanders || {};
+    const cmdText = cmds.alliance && cmds.horde
+      ? `${cmds.alliance.name} (${cmds.alliance.trait}) vs ${cmds.horde.name} (${cmds.horde.trait})`
+      : fightClub.round.subtitle;
+    setText(el.roundSubtitle, cmdText);
+    const series = fightClub.series || {};
+    const seriesLabel = series.winner
+      ? `SERIES #${series.number} WON BY ${series.winner.toUpperCase()}! Next series starting...`
+      : `Series #${series.number || 1} | First to ${series.winsNeeded || 3}`;
+    const mvpLabel = fightClub.roundStats?.mvp ? ` | MVP: ${fightClub.roundStats.mvp.name} (${fightClub.roundStats.mvp.kills} kills)` : "";
+    setText(el.roundMeta, `Tick ${fightClub.roundTick}/${fightClub.round.durationTicks} | Alliance ${fightClub.wins.alliance} - Horde ${fightClub.wins.horde} | ${seriesLabel}${mvpLabel}`);
     const p = fightClub.prediction;
     setText(el.predictionStats, `Votes ${p.total} | Alliance ${p.alliancePct}% (${p.alliance}) | Horde ${p.hordePct}% (${p.horde})`);
     
@@ -505,13 +544,22 @@ function render(state) {
   if (fightClub && fightClub.history && el.matchHistory) {
     el.matchHistory.innerHTML = fightClub.history.slice(-6).reverse().map((h) => {
       const wColor = h.winner === "alliance" ? "var(--alliance)" : h.winner === "horde" ? "var(--horde)" : "var(--muted)";
-      return `<tr><td>${escapeHtml(h.title)}</td><td style="color:${wColor}">${h.winner}</td><td>${h.rewards?.allianceWoa || 0}</td><td>${h.rewards?.hordeWoa || 0}</td></tr>`;
+      const mvpName = h.mvp ? escapeHtml(h.mvp.name) : "-";
+      return `<tr><td>${escapeHtml(h.title)}</td><td style="color:${wColor}">${h.winner}</td><td>${mvpName}</td><td>${h.rewards?.allianceWoa || 0}</td><td>${h.rewards?.hordeWoa || 0}</td></tr>`;
     }).join("");
   }
 
   if (fightClub && fightClub.round && fightClub.round.id !== lastRoundId) {
     lastRoundId = fightClub.round.id;
     audio.emitRoundStart();
+  }
+
+  // Series winner audio
+  if (fightClub && fightClub.series?.winner && !fightClub._seriesWinPlayed) {
+    fightClub._seriesWinPlayed = true;
+    audio.playSeriesWin(fightClub.series.winner);
+  } else if (fightClub && !fightClub.series?.winner) {
+    fightClub._seriesWinPlayed = false;
   }
 
   const events = state.recentEvents || [];

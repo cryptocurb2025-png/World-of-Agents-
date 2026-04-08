@@ -129,11 +129,49 @@ const FIGHT_CLUB_ROUNDS = [
   },
 ];
 
+const SERIES_LENGTH = FIGHT_CLUB_ROUNDS.length; // Best-of-4
+const SERIES_WIN_THRESHOLD = 3; // First to 3 wins takes the series
+
+// --- AI Commander system ---
+// Each faction gets a commander personality that influences strategy
+const AI_COMMANDERS = {
+  alliance: [
+    { name: "High Marshal Lothar", style: "aggressive", trait: "Relentless Push", desc: "Favors all-out offense. Units press forward constantly." },
+    { name: "Lady Jaina Proudmoore", style: "balanced", trait: "Arcane Precision", desc: "Calculated moves. Balanced attack and defense." },
+    { name: "General Turalyon", style: "defensive", trait: "Holy Bulwark", desc: "Fortifies positions. Towers and stronghold are priority." },
+    { name: "Sky-Admiral Rogers", style: "siege", trait: "Siege Doctrine", desc: "Focuses on structure damage. Ballistas and siege units favored." },
+  ],
+  horde: [
+    { name: "Warlord Garrosh", style: "aggressive", trait: "Blood Fury", desc: "Pure aggression. No retreat, no surrender." },
+    { name: "Sylvanas Windrunner", style: "balanced", trait: "Dark Tactics", desc: "Cunning strategy. Strike where they're weakest." },
+    { name: "Saurfang the Elder", style: "defensive", trait: "Honor Guard", desc: "Protects the stronghold. Counterattacks when advantage appears." },
+    { name: "Gul'dan", style: "siege", trait: "Fel Bombardment", desc: "Sacrifices units for devastating siege damage." },
+  ],
+};
+
+function pickRandomCommander(faction) {
+  const pool = AI_COMMANDERS[faction];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Active commanders for current series
+let commanders = {
+  alliance: pickRandomCommander("alliance"),
+  horde: pickRandomCommander("horde"),
+};
+
 const fightClub = {
   roundIndex: 0,
   wins: { alliance: 0, horde: 0 },
+  seriesNumber: 1,
+  seriesActive: true,
+  seriesWinner: null,
   history: [],
   predictions: Object.fromEntries(FIGHT_CLUB_ROUNDS.map((r) => [r.id, { alliance: 0, horde: 0 }])),
+  // Round-level stats
+  roundStats: { kills: { alliance: 0, horde: 0 }, towersDestroyed: { alliance: 0, horde: 0 }, mvp: null },
+  // All-time stats
+  allTime: { seriesPlayed: 0, allianceSeriesWins: 0, hordeSeriesWins: 0, totalRounds: 0 },
 };
 
 const rewardLedger = loadRewardLedger();
@@ -276,14 +314,38 @@ function createScaledHero(def) {
   return hero;
 }
 
+function computeRoundStats(state) {
+  // Determine MVP (hero with most kills + gold)
+  const allHeroes = [...state.heroes.alliance, ...state.heroes.horde];
+  let mvp = null;
+  let bestScore = -1;
+  for (const h of allHeroes) {
+    const score = (h.kills || 0) * 100 + (h.gold || 0);
+    if (score > bestScore) {
+      bestScore = score;
+      mvp = { name: h.name, class: h.class, faction: h.faction, kills: h.kills || 0, gold: h.gold || 0 };
+    }
+  }
+
+  // Count kills per faction
+  const aKills = state.heroes.alliance.reduce((s, h) => s + (h.kills || 0), 0);
+  const hKills = state.heroes.horde.reduce((s, h) => s + (h.kills || 0), 0);
+
+  return { kills: { alliance: aKills, horde: hKills }, mvp };
+}
+
 function finalizeRoundAndAdvance() {
   const round = FIGHT_CLUB_ROUNDS[fightClub.roundIndex];
   const winner = resolveRoundWinner(gameState);
   const rewards = estimateRoundWoa(gameState, winner);
+  const stats = computeRoundStats(gameState);
 
   if (winner === "alliance" || winner === "horde") {
     fightClub.wins[winner]++;
   }
+
+  fightClub.roundStats = stats;
+  fightClub.allTime.totalRounds++;
 
   fightClub.history.push({
     roundId: round.id,
@@ -292,10 +354,12 @@ function finalizeRoundAndAdvance() {
     tick: gameState.tick,
     endedAt: new Date().toISOString(),
     rewards,
+    mvp: stats.mvp,
+    kills: stats.kills,
   });
 
-  if (fightClub.history.length > 12) {
-    fightClub.history = fightClub.history.slice(-12);
+  if (fightClub.history.length > 20) {
+    fightClub.history = fightClub.history.slice(-20);
   }
 
   rewardLedger.factions.alliance += rewards.allianceWoa;
@@ -319,7 +383,7 @@ function finalizeRoundAndAdvance() {
     if (presence >= PARTICIPATION_GATE) {
       qualifiedSessions.push(info.sessionId);
     }
-    info.ticksPresent = 0; // Reset for next round
+    info.ticksPresent = 0;
   }
 
   if (qualifiedSessions.length > 0) {
@@ -334,6 +398,30 @@ function finalizeRoundAndAdvance() {
       }
     }
     persistPlayerBalances();
+  }
+
+  // --- Series progression ---
+  // Check if a faction won the series (first to SERIES_WIN_THRESHOLD)
+  if (fightClub.wins.alliance >= SERIES_WIN_THRESHOLD || fightClub.wins.horde >= SERIES_WIN_THRESHOLD) {
+    fightClub.seriesWinner = fightClub.wins.alliance >= SERIES_WIN_THRESHOLD ? "alliance" : "horde";
+    fightClub.allTime.seriesPlayed++;
+    if (fightClub.seriesWinner === "alliance") fightClub.allTime.allianceSeriesWins++;
+    else fightClub.allTime.hordeSeriesWins++;
+
+    console.log(`[SERIES] Series #${fightClub.seriesNumber} won by ${fightClub.seriesWinner.toUpperCase()} (${fightClub.wins.alliance}-${fightClub.wins.horde})`);
+
+    // Start new series after a brief pause — new commanders each series
+    setTimeout(() => {
+      fightClub.seriesNumber++;
+      fightClub.wins = { alliance: 0, horde: 0 };
+      fightClub.seriesWinner = null;
+      fightClub.roundIndex = 0;
+      fightClub.predictions = Object.fromEntries(FIGHT_CLUB_ROUNDS.map((r) => [r.id, { alliance: 0, horde: 0 }]));
+      commanders = { alliance: pickRandomCommander("alliance"), horde: pickRandomCommander("horde") };
+      gameState = initRoundState(0);
+      console.log(`[SERIES] Series #${fightClub.seriesNumber} started! Commanders: ${commanders.alliance.name} vs ${commanders.horde.name}`);
+    }, 8000);
+    return;
   }
 
   fightClub.roundIndex = (fightClub.roundIndex + 1) % FIGHT_CLUB_ROUNDS.length;
@@ -405,6 +493,17 @@ function getFightClubSummary() {
       roundsTracked: rewardLedger.rounds.length,
       woaPerGold: WOA_PER_GOLD,
       perRoundCap: WOA_PER_ROUND_CAP,
+    },
+    series: {
+      number: fightClub.seriesNumber,
+      winner: fightClub.seriesWinner,
+      winsNeeded: SERIES_WIN_THRESHOLD,
+    },
+    roundStats: fightClub.roundStats,
+    allTime: fightClub.allTime,
+    commanders: {
+      alliance: commanders.alliance,
+      horde: commanders.horde,
     },
   };
 }
@@ -566,7 +665,27 @@ const server = http.createServer(async (req, res) => {
     return sendText(res, 405, "Method Not Allowed");
   }
 
-  const targetPath = pathname === "/" ? "/index.html" : pathname;
+  // Serve docs as static markdown via a simple HTML wrapper
+  if (pathname === "/docs" || pathname === "/docs/") {
+    const docsIndex = path.join(__dirname, "docs", "README.md");
+    try {
+      const md = fs.readFileSync(docsIndex, "utf8");
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>War of Agents - Docs</title>
+<link rel="stylesheet" href="/styles.css">
+<style>body{padding:40px;max-width:800px;margin:0 auto}.doc-content{background:rgba(11,11,16,0.9);border:1px solid rgba(240,201,106,0.25);border-radius:14px;padding:32px}
+.doc-content h1,.doc-content h2,.doc-content h3{font-family:Cinzel,Georgia,serif;color:var(--brass)}
+.doc-content pre{background:rgba(0,0,0,0.4);padding:12px;border-radius:8px;overflow-x:auto}
+.doc-content a{color:var(--alliance)}
+.doc-back{display:inline-block;margin-bottom:16px;color:var(--brass);font-size:13px}</style></head>
+<body><a class="doc-back" href="/">&larr; Back to Arena</a><div class="doc-content"><pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">${md.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre></div></body></html>`;
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(html);
+    } catch {
+      return sendText(res, 404, "Docs not found");
+    }
+  }
+
+  const targetPath = pathname === "/" ? "/index.html" : pathname === "/pvp" ? "/pvp.html" : pathname;
   const resolved = safeResolvePublicPath(targetPath);
   if (!resolved) return sendText(res, 403, "Forbidden");
 

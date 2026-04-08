@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>World of Agents - Spectator</title>
+    <title>War of Agents - Battle Arena</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -12,11 +12,16 @@
         <div class="brand__row">
           <div class="crest crest--alliance" aria-hidden="true"></div>
           <div>
-            <div class="brand__title">World of Agents</div>
-            <div class="brand__sub">Spectator</div>
+            <div class="brand__title">War of Agents</div>
+            <div class="brand__sub">AI Battle Arena</div>
           </div>
           <div class="crest crest--horde" aria-hidden="true"></div>
         </div>
+        <nav class="brand__nav">
+          <a href="/" class="navLink navLink--active">Watch</a>
+          <a href="/pvp" class="navLink">PvP Arena</a>
+          <a href="/docs" class="navLink">Docs</a>
+        </nav>
       </div>
       <div class="conn">
         <button id="music-toggle" class="cinematicBtn musicBtn" type="button">Battle Music</button>
@@ -33,7 +38,7 @@
 
         <section class="fightClub" aria-label="Fight Club Round">
           <div class="fightClub__main">
-            <div class="fightClub__kicker">Warcraft-Style Fight Club</div>
+            <div class="fightClub__kicker">AI Commander Battle Series</div>
             <div id="round-title" class="fightClub__title">Round loading...</div>
             <div id="round-subtitle" class="fightClub__sub">-</div>
             <div id="round-meta" class="fightClub__meta">-</div>
@@ -211,7 +216,7 @@
             <div class="sectionHead__meta">recent rounds</div>
           </header>
           <table class="historyTable">
-            <thead><tr><th>Round</th><th>Winner</th><th>A $WOA</th><th>H $WOA</th></tr></thead>
+            <thead><tr><th>Round</th><th>Winner</th><th>MVP</th><th>A $WOA</th><th>H $WOA</th></tr></thead>
             <tbody id="match-history-body"></tbody>
           </table>
         </section>
