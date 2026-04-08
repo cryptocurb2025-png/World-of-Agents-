@@ -132,26 +132,165 @@ class AudioManager {
     osc.stop(this.ctx.currentTime + duration);
   }
 
-  playAttack() { this._noise(0.05, 2000); }
+  playAttack() {
+    this._noise(0.04 + Math.random() * 0.02, 1800 + Math.random() * 600);
+  }
   playAbility(type) {
     if (!this.enabled || !this.ctx) return;
-    if (type === "heal") { this._tone(523, 0.15, "sine", this.volume * 0.6); this._tone(659, 0.15, "sine", this.volume * 0.4); }
-    else if (type === "stun") { this._tone(220, 0.08, "sawtooth"); this._tone(440, 0.08, "sawtooth"); }
-    else if (type === "slow" || type === "frost") { this._tone(300, 0.2, "triangle"); }
-    else { this._tone(350, 0.12, "sawtooth"); this._tone(700, 0.08, "square"); }
+    const pitchVar = 1 + (Math.random() - 0.5) * 0.1;
+    if (type === "heal") { this._tone(523 * pitchVar, 0.15, "sine", this.volume * 0.5); this._tone(659 * pitchVar, 0.15, "sine", this.volume * 0.35); }
+    else if (type === "stun") { this._tone(220 * pitchVar, 0.08, "sawtooth"); this._tone(440 * pitchVar, 0.08, "sawtooth"); }
+    else if (type === "slow" || type === "frost") { this._tone(300 * pitchVar, 0.2, "triangle"); }
+    else { this._tone(350 * pitchVar, 0.12, "sawtooth"); this._tone(700 * pitchVar, 0.08, "square"); }
   }
   playKill() {
     if (!this.enabled || !this.ctx) return;
-    this._tone(80, 0.15, "sawtooth", this.volume);
-    setTimeout(() => this._tone(1200, 0.1, "square", this.volume * 0.6), 50);
+    this._tone(80, 0.18, "sawtooth", this.volume * 0.8);
+    setTimeout(() => this._tone(1200, 0.12, "square", this.volume * 0.5), 50);
+    setTimeout(() => this._noise(0.08, 600), 80);
   }
   playRoundStart() {
     if (!this.enabled || !this.ctx) return;
-    this._tone(440, 0.12, "square", this.volume * 0.5);
-    setTimeout(() => this._tone(523, 0.12, "square", this.volume * 0.5), 120);
-    setTimeout(() => this._tone(659, 0.18, "square", this.volume * 0.6), 240);
+    // War horn fanfare — 3 rising tones + drum hit
+    this._tone(220, 0.3, "sawtooth", this.volume * 0.4);
+    setTimeout(() => this._tone(330, 0.3, "sawtooth", this.volume * 0.4), 200);
+    setTimeout(() => this._tone(440, 0.4, "sawtooth", this.volume * 0.5), 400);
+    setTimeout(() => this._noise(0.12, 200), 600); // drum
   }
-  playTowerDestroy() { this._noise(0.2, 800); this._tone(100, 0.2, "sawtooth"); }
+  playTowerDestroy() {
+    this._noise(0.25, 600);
+    this._tone(80, 0.3, "sawtooth", this.volume * 0.6);
+    setTimeout(() => this._noise(0.15, 300), 100);
+  }
+
+  // --- Epic Warcraft-style background music ---
+  _bgNodes = [];
+  _bgPlaying = false;
+
+  startBattleMusic() {
+    if (!this.ctx || this._bgPlaying) return;
+    this._bgPlaying = true;
+    const ctx = this.ctx;
+    const masterGain = ctx.createGain();
+    masterGain.gain.value = this.volume * 0.12;
+    masterGain.connect(ctx.destination);
+
+    // War drums — looping low kick pattern
+    const drumLoop = () => {
+      if (!this._bgPlaying || !this.enabled) return;
+      const now = ctx.currentTime;
+      // Kick pattern: boom-boom-rest-boom (each beat ~0.6s)
+      const pattern = [0, 0.6, 1.8];
+      for (const offset of pattern) {
+        const sr = ctx.sampleRate;
+        const len = Math.floor(sr * 0.12);
+        const buf = ctx.createBuffer(1, len, sr);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) {
+          data[i] = Math.sin(i / sr * Math.PI * 2 * (60 - i / len * 30)) * Math.exp(-i / len * 4);
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const g = ctx.createGain();
+        g.gain.value = 0.7;
+        src.connect(g);
+        g.connect(masterGain);
+        src.start(now + offset);
+      }
+      this._drumTimer = setTimeout(drumLoop, 2400);
+    };
+
+    // Brass drone — sustained low chord (Dm: D2, A2, D3, F3)
+    const droneNotes = [73.42, 110, 146.83, 174.61];
+    for (const freq of droneNotes) {
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.value = freq;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 400;
+      filter.Q.value = 2;
+      // Slow LFO on filter for movement
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.15 + Math.random() * 0.1;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 80;
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      lfo.start();
+      const g = ctx.createGain();
+      g.gain.value = 0.25;
+      osc.connect(filter);
+      filter.connect(g);
+      g.connect(masterGain);
+      osc.start();
+      this._bgNodes.push(osc, lfo);
+    }
+
+    // Melody — simple heroic motif on a high sawtooth, looping
+    const melodyLoop = () => {
+      if (!this._bgPlaying || !this.enabled) return;
+      const now = ctx.currentTime;
+      // D minor pentatonic heroic phrase
+      const notes = [293.66, 349.23, 392, 440, 392, 349.23, 293.66, 261.63];
+      const durations = [0.5, 0.5, 0.25, 0.75, 0.5, 0.5, 0.5, 0.5];
+      let t = 0;
+      for (let i = 0; i < notes.length; i++) {
+        const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.value = notes[i];
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, now + t);
+        g.gain.linearRampToValueAtTime(0.18, now + t + 0.05);
+        g.gain.linearRampToValueAtTime(0, now + t + durations[i] * 0.9);
+        osc.connect(g);
+        g.connect(masterGain);
+        osc.start(now + t);
+        osc.stop(now + t + durations[i]);
+        t += durations[i];
+      }
+      this._melodyTimer = setTimeout(melodyLoop, t * 1000 + 1200);
+    };
+
+    // String pad — soft background harmony
+    const padNotes = [146.83, 220, 293.66]; // D3, A3, D4
+    for (const freq of padNotes) {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.value = 0.08;
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start();
+      this._bgNodes.push(osc);
+    }
+
+    this._bgMasterGain = masterGain;
+    this._bgNodes.push(masterGain);
+    drumLoop();
+    setTimeout(melodyLoop, 2000);
+  }
+
+  stopBattleMusic() {
+    this._bgPlaying = false;
+    clearTimeout(this._drumTimer);
+    clearTimeout(this._melodyTimer);
+    for (const node of this._bgNodes) {
+      try { node.stop?.(); } catch {}
+      try { node.disconnect(); } catch {}
+    }
+    this._bgNodes = [];
+  }
+
+  toggleMusicOnly() {
+    if (this._bgPlaying) {
+      this.stopBattleMusic();
+    } else {
+      this.startBattleMusic();
+    }
+    return this._bgPlaying;
+  }
 
   emitRoundStart() { this.playRoundStart(); }
   emitAttack() { this.playAttack(); }
@@ -206,7 +345,11 @@ function schedulePaint() {
       return;
     }
     lastPaint = now;
-    if (latestState) render(latestState);
+    if (latestState) {
+      render(latestState);
+      updateFps();
+      updateSocialStats(latestState);
+    }
   });
 }
 
@@ -564,6 +707,33 @@ function createMapRenderer(canvas) {
     banner: loadSprite("/assets/structures/center-banner.svg"),
   };
 
+  // --- Ambient particles (embers, dust) ---
+  const ambientParticles = [];
+  const MAX_PARTICLES = 40;
+  function spawnParticle() {
+    ambientParticles.push({
+      x: Math.random() * cssW,
+      y: cssH + 5,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: -(0.3 + Math.random() * 0.5),
+      size: 1 + Math.random() * 2.5,
+      life: 1,
+      decay: 0.002 + Math.random() * 0.003,
+      color: Math.random() > 0.6 ? "#f0c96a" : Math.random() > 0.5 ? "#ff9944" : "#ffcc88",
+    });
+  }
+
+  // --- Screen shake ---
+  let shakeAmount = 0;
+  let shakeDecay = 0;
+  function triggerShake(intensity) {
+    shakeAmount = intensity;
+    shakeDecay = intensity * 0.12;
+  }
+
+  // --- Dynamic light flashes ---
+  const lightFlashes = []; // { x, y, radius, color, alpha, decay }
+
   function resizeToCss() {
     const parent = canvas.parentElement;
     if (!parent) return;
@@ -598,8 +768,19 @@ function createMapRenderer(canvas) {
     resizeToCss();
     const now = performance.now();
 
+    // Apply screen shake
+    ctx.save();
+    if (shakeAmount > 0.5) {
+      const sx = (Math.random() - 0.5) * shakeAmount;
+      const sy = (Math.random() - 0.5) * shakeAmount;
+      ctx.translate(sx, sy);
+      shakeAmount -= shakeDecay;
+    } else {
+      shakeAmount = 0;
+    }
+
     ctx.fillStyle = "#0a0c12";
-    ctx.fillRect(0, 0, cssW, cssH);
+    ctx.fillRect(-5, -5, cssW + 10, cssH + 10);
     if (arena.complete) {
       ctx.globalAlpha = 0.72;
       ctx.drawImage(arena, 0, 0, cssW, cssH);
@@ -610,30 +791,41 @@ function createMapRenderer(canvas) {
 
     for (const lane of ["top", "mid", "bot"]) {
       const y = yFromLane(lane);
+      // Lane path - wider dark trench
       ctx.strokeStyle = "rgba(0,0,0,0.28)";
-      ctx.lineWidth = 14;
+      ctx.lineWidth = 16;
       ctx.beginPath();
       ctx.moveTo(xFromPos(-100), y);
       ctx.lineTo(xFromPos(100), y);
       ctx.stroke();
 
-      ctx.strokeStyle = "rgba(242,237,226,0.18)";
-      ctx.lineWidth = 4;
+      // Lane path - inner highlight
+      ctx.strokeStyle = "rgba(242,237,226,0.14)";
+      ctx.lineWidth = 6;
       ctx.beginPath();
       ctx.moveTo(xFromPos(-100), y);
       ctx.lineTo(xFromPos(100), y);
       ctx.stroke();
 
+      // Animated pulsing frontline marker
       const fx = xFromPos(state.lanes[lane].frontline);
-      ctx.strokeStyle = "rgba(240,201,106,0.85)";
+      const pulse = 0.65 + Math.sin(now / 300) * 0.2;
+      ctx.strokeStyle = `rgba(240,201,106,${pulse})`;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(fx, y - 16);
-      ctx.lineTo(fx, y + 16);
+      ctx.moveTo(fx, y - 18);
+      ctx.lineTo(fx, y + 18);
       ctx.stroke();
+      // Frontline glow
+      const grad = ctx.createRadialGradient(fx, y, 0, fx, y, 24);
+      grad.addColorStop(0, `rgba(240,201,106,${pulse * 0.15})`);
+      grad.addColorStop(1, "transparent");
+      ctx.fillStyle = grad;
+      ctx.fillRect(fx - 24, y - 24, 48, 48);
 
-      ctx.fillStyle = "rgba(242,237,226,0.52)";
-      ctx.font = "11px Georgia, serif";
-      ctx.fillText(lane.toUpperCase(), 10, y - 8);
+      ctx.fillStyle = "rgba(242,237,226,0.45)";
+      ctx.font = "bold 10px Manrope, sans-serif";
+      ctx.fillText(lane.toUpperCase(), 10, y - 10);
     }
 
     drawCenterBanner();
@@ -653,7 +845,12 @@ function createMapRenderer(canvas) {
     drawEffects();
     drawHitFlashes(now, state);
     drawGroundRings(now);
+    drawLightFlashes(now);
+    drawAmbientParticles(now);
+    drawEdgeFog(now);
     drawKillFeed(now);
+
+    ctx.restore();
   }
 
   function drawMapFrame() {
@@ -679,10 +876,14 @@ function createMapRenderer(canvas) {
       const wobble = Math.sin(now / 120 + i * 0.7) * 1.5;
       const yOffset = ((i % 5) - 2) * 4 + wobble;
       const sprite = loadSprite(unitSpritePath(u.type, faction));
-      const size = u.type === "BALLISTA" ? 24 : 18;
+      const t = String(u.type || "").toUpperCase();
+      const isBig = t === "BALLISTA" || t === "CATAPULT" || t === "OGRE_LORD";
+      const size = isBig ? 26 : t === "OGRE" || t === "DEATH_KNIGHT" || t === "KNIGHT" ? 22 : 18;
       const drawY = y + yOffset;
-      const maxHp = UNIT_MAX_HP_BY_TYPE[String(u.type || "").toUpperCase()] || u.hp;
+      const maxHp = UNIT_MAX_HP_BY_TYPE[t] || u.hp;
+      const hpPct = maxHp > 0 ? u.hp / maxHp : 1;
 
+      // Shadow
       ctx.fillStyle = "rgba(0,0,0,0.22)";
       ctx.beginPath();
       ctx.ellipse(x, drawY + size * 0.38, size * 0.33, 3.2, 0, 0, Math.PI * 2);
@@ -690,7 +891,7 @@ function createMapRenderer(canvas) {
 
       if (sprite.complete) {
         ctx.shadowBlur = 8;
-        ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.45)" : "rgba(255,92,122,0.45)";
+        ctx.shadowColor = faction === "alliance" ? "rgba(87,189,255,0.40)" : "rgba(255,92,122,0.40)";
         ctx.drawImage(sprite, x - size / 2, drawY - size / 2, size, size);
         ctx.shadowBlur = 0;
       } else {
@@ -698,8 +899,11 @@ function createMapRenderer(canvas) {
         ctx.fillRect(x - 2, drawY - 2, 4, 4);
       }
 
-      if ((u.type === "BALLISTA" || u.type === "OGRE" || u.type === "DEATH_KNIGHT") && u.hp < maxHp) {
-        drawBar(x - 8, drawY - size / 2 - 6, 16, 3, u.hp / maxHp, faction === "alliance" ? "#7bb0ff" : "#ff7c95");
+      // HP bar for all units when damaged
+      if (hpPct < 1) {
+        const barW = size > 20 ? 18 : 12;
+        const barColor = hpPct > 0.5 ? (faction === "alliance" ? "#7bb0ff" : "#ff7c95") : hpPct > 0.25 ? "#f0c96a" : "#ff4444";
+        drawBar(x - barW / 2, drawY - size / 2 - 5, barW, 2, hpPct, barColor);
       }
     }
   }
@@ -739,11 +943,28 @@ function createMapRenderer(canvas) {
     ctx.ellipse(x, y + 22, 20, 6, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    // Under attack glow
+    if (base.underAttack) {
+      const pulse = 0.3 + Math.sin(performance.now() / 150) * 0.15;
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = `rgba(255,60,60,${pulse})`;
+    }
+
     if (sprite.complete) {
       ctx.drawImage(sprite, x - size / 2, y - size / 2 + 4, size, size);
     }
+    ctx.shadowBlur = 0;
 
-    drawBar(x - 18, y - 26, 36, 4, base.hp / base.maxHp, faction === "alliance" ? "#7bb0ff" : "#ff7c95");
+    const hpPct = base.maxHp > 0 ? base.hp / base.maxHp : 0;
+    const barColor = hpPct > 0.5 ? (faction === "alliance" ? "#7bb0ff" : "#ff7c95") : hpPct > 0.25 ? "#f0c96a" : "#ff4444";
+    drawBar(x - 18, y - 26, 36, 4, hpPct, barColor);
+
+    // HP text on keeps
+    ctx.font = "bold 9px Manrope, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(242,237,226,0.65)";
+    ctx.fillText(`${base.hp}/${base.maxHp}`, x, y + 36);
+    ctx.textAlign = "left";
   }
 
   function drawHero(hero, faction, state, now) {
@@ -796,8 +1017,20 @@ function createMapRenderer(canvas) {
       ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
       ctx.shadowBlur = 0;
     }
-    drawBar(x - 16, y - 25, 32, 4, hero.hp / hero.maxHp, "#67dd8f");
+    // HP bar with color coding
+    const hpPct = hero.maxHp > 0 ? hero.hp / hero.maxHp : 0;
+    const hpColor = hpPct > 0.5 ? "#67dd8f" : hpPct > 0.25 ? "#f0c96a" : "#ff4444";
+    drawBar(x - 16, y - 25, 32, 4, hpPct, hpColor);
     drawBar(x - 16, y - 19, 32, 3, hero.mana / hero.maxMana, accent);
+
+    // Hero name label
+    ctx.globalAlpha = hero.alive ? 0.85 : 0.4;
+    ctx.font = "bold 9px Manrope, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = accent;
+    const shortName = hero.name.length > 14 ? hero.name.slice(0, 12) + ".." : hero.name;
+    ctx.fillText(shortName, x, y - 30);
+    ctx.textAlign = "left";
     ctx.globalAlpha = 1;
   }
 
@@ -1013,6 +1246,14 @@ function createMapRenderer(canvas) {
         size: e.type === "hero_kill" ? 14 : 8,
       });
 
+      // Dynamic lighting on ability impacts
+      const impactX = xFromPos(impactPos);
+      const impactY = yFromLane(lane);
+      addLightFlash(impactX, impactY, e.type === "hero_kill" ? 80 : 40, style.color);
+
+      // Screen shake on hero kills
+      if (e.type === "hero_kill") triggerShake(6);
+
       if (["damage", "hero_attack", "attack"].includes(e.type)) {
         const targetId = e.targetId || e.target || e.defender;
         if (targetId) {
@@ -1028,6 +1269,78 @@ function createMapRenderer(canvas) {
         });
       }
     }
+  }
+
+  function drawAmbientParticles(now) {
+    // Spawn new particles
+    if (ambientParticles.length < MAX_PARTICLES && Math.random() < 0.15) spawnParticle();
+
+    for (let i = ambientParticles.length - 1; i >= 0; i--) {
+      const p = ambientParticles[i];
+      p.x += p.vx + Math.sin(now / 1000 + i) * 0.15;
+      p.y += p.vy;
+      p.life -= p.decay;
+      if (p.life <= 0 || p.y < -10) {
+        ambientParticles.splice(i, 1);
+        continue;
+      }
+      ctx.globalAlpha = p.life * 0.6;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawEdgeFog(now) {
+    // Atmospheric fog at left and right edges
+    const fogW = cssW * 0.12;
+    const pulse = 0.6 + Math.sin(now / 2000) * 0.08;
+
+    // Alliance side fog (blue tint)
+    const leftGrad = ctx.createLinearGradient(0, 0, fogW, 0);
+    leftGrad.addColorStop(0, `rgba(40,80,140,${pulse * 0.35})`);
+    leftGrad.addColorStop(1, "transparent");
+    ctx.fillStyle = leftGrad;
+    ctx.fillRect(0, 0, fogW, cssH);
+
+    // Horde side fog (red tint)
+    const rightGrad = ctx.createLinearGradient(cssW, 0, cssW - fogW, 0);
+    rightGrad.addColorStop(0, `rgba(140,40,50,${pulse * 0.35})`);
+    rightGrad.addColorStop(1, "transparent");
+    ctx.fillStyle = rightGrad;
+    ctx.fillRect(cssW - fogW, 0, fogW, cssH);
+
+    // Top and bottom atmospheric haze
+    const topGrad = ctx.createLinearGradient(0, 0, 0, cssH * 0.1);
+    topGrad.addColorStop(0, "rgba(5,5,10,0.5)");
+    topGrad.addColorStop(1, "transparent");
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(0, 0, cssW, cssH * 0.1);
+
+    const botGrad = ctx.createLinearGradient(0, cssH, 0, cssH * 0.9);
+    botGrad.addColorStop(0, "rgba(5,5,10,0.6)");
+    botGrad.addColorStop(1, "transparent");
+    ctx.fillStyle = botGrad;
+    ctx.fillRect(0, cssH * 0.9, cssW, cssH * 0.1);
+  }
+
+  function drawLightFlashes(now) {
+    for (let i = lightFlashes.length - 1; i >= 0; i--) {
+      const lf = lightFlashes[i];
+      lf.alpha -= lf.decay;
+      if (lf.alpha <= 0) { lightFlashes.splice(i, 1); continue; }
+      const grad = ctx.createRadialGradient(lf.x, lf.y, 0, lf.x, lf.y, lf.radius);
+      grad.addColorStop(0, lf.color.replace(")", `,${lf.alpha * 0.3})`).replace("rgb(", "rgba("));
+      grad.addColorStop(1, "transparent");
+      ctx.fillStyle = grad;
+      ctx.fillRect(lf.x - lf.radius, lf.y - lf.radius, lf.radius * 2, lf.radius * 2);
+    }
+  }
+
+  function addLightFlash(x, y, radius, color) {
+    lightFlashes.push({ x, y, radius, color, alpha: 1, decay: 0.03 });
   }
 
   function drawKillFeed(now) {
@@ -1077,14 +1390,26 @@ function createMapRenderer(canvas) {
 
 function attachAudioHandler() {
   const saved = localStorage.getItem("woa-muted") === "1";
+  const musicToggle = document.getElementById("music-toggle");
+
   if (el.audioToggle) {
-    el.audioToggle.textContent = saved ? "Unmute" : "Mute";
+    el.audioToggle.textContent = saved ? "Unmute SFX" : "Mute SFX";
     el.audioToggle.addEventListener("click", () => {
-      audio.init(); // First click creates AudioContext (browser policy)
+      audio.init();
       const muted = audio.toggleMute();
-      el.audioToggle.textContent = muted ? "Unmute" : "Mute";
+      el.audioToggle.textContent = muted ? "Unmute SFX" : "Mute SFX";
+      if (muted) { audio.stopBattleMusic(); }
     });
   }
+
+  if (musicToggle) {
+    musicToggle.addEventListener("click", () => {
+      audio.init();
+      const playing = audio.toggleMusicOnly();
+      musicToggle.textContent = playing ? "Stop Music" : "Battle Music";
+    });
+  }
+
   // Init audio on first interaction
   document.addEventListener("click", () => audio.init(), { once: true });
 }
@@ -1127,8 +1452,61 @@ setInterval(async () => {
   } catch { /* ignore */ }
 }, 15000);
 
+// --- Social panel: FPS counter, match timer, info toggle ---
+let frameCount = 0;
+let lastFpsUpdate = performance.now();
+let currentFps = 0;
+
+function updateFps() {
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsUpdate >= 1000) {
+    currentFps = frameCount;
+    frameCount = 0;
+    lastFpsUpdate = now;
+    const fpsEl = document.getElementById("stat-fps");
+    if (fpsEl) fpsEl.textContent = `FPS: ${currentFps}`;
+  }
+}
+
+function updateSocialStats(state) {
+  if (!state) return;
+  const timerEl = document.getElementById("stat-timer");
+  const specEl = document.getElementById("stat-spectators");
+  const allyEl = document.getElementById("stat-alliance");
+  const hordeEl = document.getElementById("stat-horde");
+
+  if (timerEl) {
+    const tick = state.tick || 0;
+    const secs = Math.floor(tick / 10);
+    const mins = Math.floor(secs / 60);
+    const remSecs = secs % 60;
+    timerEl.textContent = `Match: ${mins}:${String(remSecs).padStart(2, "0")}`;
+  }
+
+  const aHeroes = state.heroes?.alliance?.length || 0;
+  const hHeroes = state.heroes?.horde?.length || 0;
+  const aUnits = Object.values(state.lanes || {}).reduce((s, l) => s + (l?.alliance?.units || 0), 0);
+  const hUnits = Object.values(state.lanes || {}).reduce((s, l) => s + (l?.horde?.units || 0), 0);
+
+  if (specEl) specEl.textContent = `Spectators: live`;
+  if (allyEl) allyEl.textContent = `Alliance: ${aHeroes} heroes, ${aUnits} units`;
+  if (hordeEl) hordeEl.textContent = `Horde: ${hHeroes} heroes, ${hUnits} units`;
+}
+
+function attachInfoToggle() {
+  const btn = document.getElementById("info-toggle");
+  const popup = document.getElementById("info-popup");
+  if (btn && popup) {
+    btn.addEventListener("click", () => {
+      popup.style.display = popup.style.display === "none" ? "block" : "none";
+    });
+  }
+}
+
 attachPredictionHandlers();
 attachCinematicHandler();
 attachAudioHandler();
 attachClaimHandler();
+attachInfoToggle();
 connect();
